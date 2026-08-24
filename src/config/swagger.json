@@ -1,0 +1,663 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Multi-Tenant Billing SaaS Platform API Documentation",
+    "version": "1.0.0",
+    "description": "Complete interactive API specification for Multi-Tenant Billing SaaS Backend. Supports Phone OTP Authentication, Vendor Store Workspaces, Product Catalog & Category Builder, POS Invoicing, PDF Generation, Stock Inventory, Subscriptions, Financial Reports, and Super Admin Management.",
+    "contact": {
+      "name": "SoftFYR Tech Team",
+      "url": "https://softfyr.com",
+      "email": "support@softfyr.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000/api/v1",
+      "description": "Local Development Server"
+    },
+    {
+      "url": "http://127.0.0.1:5000/api/v1",
+      "description": "Local IP Server"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    { "name": "Auth", "description": "Phone OTP Signup/Login, Password Login, and Staff Registration" },
+    { "name": "Business Store Profile", "description": "Store Workspace Setup, Taxes, and Vendor KPIs Dashboard" },
+    { "name": "Products & Categories", "description": "Product Catalog, Dynamic Category Fields, and Barcodes" },
+    { "name": "Stock & Inventory", "description": "Stock Audit Logs, Low Stock Alerts, and Adjustments" },
+    { "name": "POS Billing & Invoicing", "description": "POS Checkout, Bill Settlement, PDF Generation, and Thermal Printing" },
+    { "name": "Customers & Directory", "description": "Customer Profiles, Credit Balances, and Ledger Statements" },
+    { "name": "Employees & Payroll", "description": "Staff Directory, Roles, Access Control, and Salary Payroll" },
+    { "name": "Suppliers & Purchases", "description": "Vendor Supplier Directory and Stock Purchase Orders" },
+    { "name": "Subscriptions & Packages", "description": "SaaS Packages, Free Trial, and Upgrade Payment Ledger" },
+    { "name": "Reports & Analytics", "description": "Sales Reports, Profit/Loss Statements, and GST Tax Reports" },
+    { "name": "Support & Helpdesk", "description": "Ticket Submission, Customer Support, and Admin Replies" },
+    { "name": "Super Admin Module", "description": "Platform Tenants, SaaS Package Builder, and Global Categories" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Paste your JWT Bearer token obtained from /auth/verify-otp or /auth/login"
+      }
+    }
+  },
+  "paths": {
+    "/auth/send-otp": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Request Phone OTP SMS",
+        "description": "Sends a 6-digit verification OTP SMS via TrueBulkSMS to the provided mobile number.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["mobileNumber"],
+                "properties": {
+                  "name": { "type": "string", "example": "Ramesh Gupta" },
+                  "mobileNumber": { "type": "string", "example": "9876543210" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OTP dispatched successfully to mobile number" }
+        }
+      }
+    },
+    "/auth/verify-otp": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Verify OTP & Direct Login / Auto-Registration",
+        "description": "Verifies 6-digit OTP. Logs in existing vendors or auto-registers new vendors with 30-Day Free Trial.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["mobileNumber", "otp"],
+                "properties": {
+                  "mobileNumber": { "type": "string", "example": "9876543210" },
+                  "otp": { "type": "string", "example": "123456" },
+                  "name": { "type": "string", "example": "Ramesh Gupta" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Logged in successfully. Returns JWT Bearer token and Store details." }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Explicit Vendor Registration",
+        "description": "Registers a new Vendor Store account with Name, Mobile Number, and Verified OTP.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "mobileNumber", "otp"],
+                "properties": {
+                  "name": { "type": "string", "example": "Ramesh Gupta" },
+                  "mobileNumber": { "type": "string", "example": "9876543210" },
+                  "otp": { "type": "string", "example": "123456" },
+                  "businessName": { "type": "string", "example": "Gupta Electronics & Hardware" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Vendor store registered successfully with 30-Day Free Trial." }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Unified Email / Password Login",
+        "description": "Password-based authentication for Super Admin or Staff users.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["identifier", "password"],
+                "properties": {
+                  "identifier": { "type": "string", "example": "admin@softfyr.com" },
+                  "password": { "type": "string", "example": "Admin@12345" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Password login successful" }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get Authenticated User & Vendor Profile",
+        "description": "Returns current authenticated vendor details, active subscription package, and summary counters.",
+        "responses": {
+          "200": { "description": "Authenticated user details fetched successfully" }
+        }
+      }
+    },
+    "/auth/employee/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Register Counter Staff / Employee Account",
+        "description": "Store Owner (TENANT_ADMIN) creates a new Staff account linked to their store workspace.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "mobileNumber", "password"],
+                "properties": {
+                  "name": { "type": "string", "example": "Staff Member 1" },
+                  "mobileNumber": { "type": "string", "example": "9870001111" },
+                  "password": { "type": "string", "example": "StaffPass123" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Employee account created successfully" }
+        }
+      }
+    },
+    "/business/dashboard": {
+      "get": {
+        "tags": ["Business Store Profile"],
+        "summary": "Get Vendor Dashboard KPIs & High-Level Summary",
+        "responses": {
+          "200": { "description": "Dashboard KPIs including sales, total bills, low stock alerts, and customer count." }
+        }
+      }
+    },
+    "/business/info": {
+      "get": {
+        "tags": ["Business Store Profile"],
+        "summary": "Get Business Store Info & Active Subscription",
+        "responses": {
+          "200": { "description": "Returns store address, GSTIN, and active package plan." }
+        },
+        "put": {
+          "tags": ["Business Store Profile"],
+          "summary": "Update Business Store Profile Information",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "businessName": { "type": "string", "example": "Royal Electronics" },
+                    "gstNumber": { "type": "string", "example": "09AAAAA0000A1Z5" },
+                    "city": { "type": "string", "example": "Noida" }
+                  }
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": { "description": "Store info updated successfully" }
+          }
+        }
+      }
+    },
+    "/business/profile": {
+      "get": {
+        "tags": ["Business Store Profile"],
+        "summary": "Get Vendor Owner & Store Profile",
+        "responses": {
+          "200": { "description": "Vendor profile and tenant workspace details." }
+        }
+      }
+    },
+    "/business/create-profile": {
+      "post": {
+        "tags": ["Business Store Profile"],
+        "summary": "Create / Setup Business Store Profile",
+        "description": "Logged-in Vendor fills out store name, GSTIN, address, city, state, pincode, and completes profile.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["businessName"],
+                "properties": {
+                  "businessName": { "type": "string", "example": "Royal Electronics & Hardware" },
+                  "ownerName": { "type": "string", "example": "Ramesh Gupta" },
+                  "gstNumber": { "type": "string", "example": "09AAAAA0000A1Z5" },
+                  "panNumber": { "type": "string", "example": "ABCDE1234F" },
+                  "businessAddress": { "type": "string", "example": "Shop 14, Main Market" },
+                  "city": { "type": "string", "example": "Noida" },
+                  "state": { "type": "string", "example": "Uttar Pradesh" },
+                  "pincode": { "type": "string", "example": "201301" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Business profile created successfully and sets isProfileComplete to true." }
+        }
+      }
+    },
+    "/business/taxes": {
+      "get": {
+        "tags": ["Business Store Profile"],
+        "summary": "List All Tax Slabs Configured for Store",
+        "responses": {
+          "200": { "description": "List of tax slabs" }
+        }
+      },
+      "post": {
+        "tags": ["Business Store Profile"],
+        "summary": "Create Tax Slab (CGST/SGST/IGST)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "percentage"],
+                "properties": {
+                  "name": { "type": "string", "example": "GST 18%" },
+                  "percentage": { "type": "number", "example": 18 },
+                  "type": { "type": "string", "example": "BOTH" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Tax slab created successfully" }
+        }
+      }
+    },
+    "/products": {
+      "get": {
+        "tags": ["Products & Categories"],
+        "summary": "List Store Product Catalog",
+        "responses": {
+          "200": { "description": "List of store products with inventory counts and categories." }
+        }
+      },
+      "post": {
+        "tags": ["Products & Categories"],
+        "summary": "Add New Product to Store Catalog",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "price", "stockQuantity"],
+                "properties": {
+                  "name": { "type": "string", "example": "Wireless Mouse" },
+                  "barcode": { "type": "string", "example": "890123456789" },
+                  "price": { "type": "number", "example": 499 },
+                  "mrp": { "type": "number", "example": 999 },
+                  "stockQuantity": { "type": "number", "example": 50 },
+                  "minStockAlert": { "type": "number", "example": 5 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Product added successfully" }
+        }
+      }
+    },
+    "/inventory/logs": {
+      "get": {
+        "tags": ["Stock & Inventory"],
+        "summary": "Get Inventory Stock Audit Logs",
+        "responses": {
+          "200": { "description": "Stock change history logs" }
+        }
+      }
+    },
+    "/bills": {
+      "get": {
+        "tags": ["POS Billing & Invoicing"],
+        "summary": "List Recent Invoices & Bills",
+        "responses": {
+          "200": { "description": "List of bills" }
+        }
+      },
+      "post": {
+        "tags": ["POS Billing & Invoicing"],
+        "summary": "Create New Bill / POS Invoice",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["items"],
+                "properties": {
+                  "customerId": { "type": "string" },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "productId": { "type": "string" },
+                        "quantity": { "type": "number", "example": 2 },
+                        "unitPrice": { "type": "number", "example": 499 }
+                      }
+                    }
+                  },
+                  "paymentMethod": { "type": "string", "example": "UPI" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Bill generated successfully" }
+        }
+      }
+    },
+    "/customers": {
+      "get": {
+        "tags": ["Customers & Directory"],
+        "summary": "List Store Customers",
+        "responses": {
+          "200": { "description": "List of customers" }
+        }
+      },
+      "post": {
+        "tags": ["Customers & Directory"],
+        "summary": "Add New Customer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "mobileNumber"],
+                "properties": {
+                  "name": { "type": "string", "example": "Sunil Sharma" },
+                  "mobileNumber": { "type": "string", "example": "9998887770" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Customer added successfully" }
+        }
+      }
+    },
+    "/employees": {
+      "get": {
+        "tags": ["Employees & Payroll"],
+        "summary": "List Store Staff / Employees",
+        "responses": {
+          "200": { "description": "List of employees" }
+        }
+      }
+    },
+    "/suppliers": {
+      "get": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "List Suppliers",
+        "responses": {
+          "200": { "description": "List of suppliers" }
+        }
+      }
+    },
+    "/purchases": {
+      "get": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "List & Filter Purchase Bills (Paginated)",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 10 } },
+          { "name": "status", "in": "query", "description": "Payment Status (ALL, PAID, PARTIAL, UNPAID)", "schema": { "type": "string" } },
+          { "name": "purchaseStatus", "in": "query", "description": "Purchase Status (DRAFT, CONFIRMED, CANCELLED, PARTIALLY_RETURNED, FULLY_RETURNED)", "schema": { "type": "string" } },
+          { "name": "supplierId", "in": "query", "schema": { "type": "string" } },
+          { "name": "search", "in": "query", "description": "Search by Bill Number, Supplier Name or Company", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Paginated list of purchase bills" }
+        }
+      },
+      "post": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "Create Purchase Bill / Order",
+        "description": "Creates a purchase bill. Automatically updates product stock and supplier balance if status is CONFIRMED.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["supplierId", "items"],
+                "properties": {
+                  "supplierId": { "type": "string" },
+                  "supplierInvoiceNumber": { "type": "string", "example": "INV-SUP-8821" },
+                  "invoiceDate": { "type": "string", "format": "date", "example": "2026-08-22" },
+                  "dueDate": { "type": "string", "format": "date", "example": "2026-09-05" },
+                  "purchaseStatus": { "type": "string", "enum": ["DRAFT", "CONFIRMED"], "example": "CONFIRMED" },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["productId", "quantity", "unitPurchasePrice"],
+                      "properties": {
+                        "productId": { "type": "string" },
+                        "quantity": { "type": "integer", "example": 10 },
+                        "unitPurchasePrice": { "type": "number", "example": 250 },
+                        "discountAmount": { "type": "number", "example": 0 },
+                        "taxPercent": { "type": "number", "example": 18 }
+                      }
+                    }
+                  },
+                  "paidAmount": { "type": "number", "example": 1000 },
+                  "paymentMethod": { "type": "string", "example": "BANK" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Purchase bill created successfully" }
+        }
+      }
+    },
+    "/purchases/export": {
+      "get": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "Export Purchase Bills Data",
+        "responses": {
+          "200": { "description": "Export ready array of purchase invoice records" }
+        }
+      }
+    },
+    "/purchases/{id}": {
+      "get": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "Get Purchase Bill Details",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Complete purchase bill details with supplier and item catalog breakdown" }
+        }
+      },
+      "put": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "Update Purchase Bill",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Purchase bill updated successfully" }
+        }
+      }
+    },
+    "/purchases/{id}/confirm": {
+      "post": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "Confirm DRAFT Purchase Bill",
+        "description": "Transitions a DRAFT bill to CONFIRMED and increases product stock and supplier balance.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Draft bill confirmed and stock updated" }
+        }
+      }
+    },
+    "/purchases/{id}/payments": {
+      "post": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "Record Supplier Payment against Purchase Bill",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Payment recorded and supplier balance updated" }
+        }
+      }
+    },
+    "/purchases/{id}/return": {
+      "post": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "Process Product Return against Purchase Bill",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Purchase return processed and stock adjusted" }
+        }
+      }
+    },
+    "/purchases/{id}/cancel": {
+      "post": {
+        "tags": ["Suppliers & Purchases"],
+        "summary": "Cancel Purchase Bill",
+        "description": "Cancels purchase bill and reverses inventory stock added during confirmation.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Purchase bill cancelled and stock addition reversed" }
+        }
+      }
+    },
+    "/subscriptions/packages": {
+      "get": {
+        "tags": ["Subscriptions & Packages"],
+        "summary": "List Available SaaS Subscription Packages",
+        "responses": {
+          "200": { "description": "Available subscription packages" }
+        }
+      }
+    },
+    "/subscriptions/upgrade": {
+      "post": {
+        "tags": ["Subscriptions & Packages"],
+        "summary": "Upgrade Vendor Subscription Plan",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["packageId"],
+                "properties": {
+                  "packageId": { "type": "string" },
+                  "paymentMethod": { "type": "string", "example": "UPI" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Subscription upgraded successfully" }
+        }
+      }
+    },
+    "/reports/sales": {
+      "get": {
+        "tags": ["Reports & Analytics"],
+        "summary": "Get Sales Report",
+        "responses": {
+          "200": { "description": "Sales report analytics" }
+        }
+      }
+    },
+    "/support/tickets": {
+      "get": {
+        "tags": ["Support & Helpdesk"],
+        "summary": "List Vendor Support Tickets",
+        "responses": {
+          "200": { "description": "List of support tickets" }
+        }
+      },
+      "post": {
+        "tags": ["Support & Helpdesk"],
+        "summary": "Raise New Support Ticket",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["subject", "message"],
+                "properties": {
+                  "subject": { "type": "string", "example": "Billing Printer Issue" },
+                  "message": { "type": "string", "example": "Thermal printer not pairing with Bluetooth." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Ticket raised successfully" }
+        }
+      }
+    },
+    "/admin/dashboard": {
+      "get": {
+        "tags": ["Super Admin Module"],
+        "summary": "Super Admin SaaS Dashboard Metrics",
+        "responses": {
+          "200": { "description": "Platform total tenants, revenue, active packages count." }
+        }
+      }
+    },
+    "/admin/tenants": {
+      "get": {
+        "tags": ["Super Admin Module"],
+        "summary": "List All Platform Tenant Stores",
+        "responses": {
+          "200": { "description": "List of all tenant store accounts" }
+        }
+      }
+    }
+  }
+}

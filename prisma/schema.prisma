@@ -1,0 +1,691 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  TENANT_ADMIN
+  EMPLOYEE
+}
+
+enum SubscriptionStatus {
+  FREE_TRIAL
+  FREE_TRIAL_ENDED
+  UPGRADED
+  EXPIRED
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum InputType {
+  TEXT
+  NUMBER
+  DATE
+}
+
+enum TaxType {
+  PERCENTAGE
+  FIXED
+}
+
+enum DiscountType {
+  NONE
+  PERCENTAGE
+  FIXED
+}
+
+enum BillStatus {
+  PAID
+  UNPAID
+  PARTIALLY_PAID
+  CANCELLED
+  PARTIALLY_RETURNED
+  FULLY_RETURNED
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  OTHER
+}
+
+enum StockReason {
+  SALE
+  CANCELLED_BILL
+  RETURN
+  NEW_PURCHASE
+  MANUAL_ADJUSTMENT
+  DAMAGED
+  LOST
+}
+
+enum PurchaseStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+  PARTIALLY_RETURNED
+  FULLY_RETURNED
+}
+
+enum TicketStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Tenant {
+  id                     String             @id @default(uuid())
+  businessName           String?
+  businessType           String?
+  ownerName              String
+  email                  String?            @unique
+  mobileNumber           String             @unique
+  businessLogo           String?
+  businessAddress        String?
+  city                   String?
+  state                  String?
+  country                String?            @default("India")
+  pincode                String?
+  gstNumber              String?
+  panNumber              String?
+  otherInvoiceInfo       String?
+  isProfileComplete      Boolean            @default(false)
+  
+  subscriptionStatus     SubscriptionStatus @default(FREE_TRIAL)
+  accountStatus          AccountStatus      @default(ACTIVE)
+  
+  currentPackageId       String?
+  currentPackage         Package?           @relation(fields: [currentPackageId], references: [id])
+  subscriptionStartDate  DateTime           @default(now())
+  subscriptionExpiryDate DateTime
+  
+  users                  User[]
+  products               Product[]
+  customers              Customer[]
+  bills                  Bill[]
+  taxes                  Tax[]
+  employees              EmployeeProfile[]
+  suppliers              Supplier[]
+  supplierPayments       SupplierPayment[]
+  purchaseInvoices       PurchaseInvoice[]
+  purchaseReturns        PurchaseReturn[]
+  supportTickets         SupportTicket[]
+  subscriptionHistory    SubscriptionHistory[]
+  stockHistory           StockHistory[]
+
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+}
+
+model User {
+  id                   String    @id @default(uuid())
+  name                 String
+  email                String?   @unique
+  mobileNumber         String    @unique
+  passwordHash         String
+  role                 UserRole  @default(EMPLOYEE)
+  status               AccountStatus @default(ACTIVE)
+  
+  resetPasswordOTP     String?
+  resetPasswordToken   String?
+  resetPasswordExpires DateTime?
+  
+  tenantId             String?
+  tenant               Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  employeeProfile EmployeeProfile?
+  generatedBills  Bill[]   @relation("BillGeneratedBy")
+  ticketMessages  TicketMessage[]
+  stockAdjustments StockHistory[]
+  processedReturns BillReturn[]
+  recordedSupplierPayments SupplierPayment[]
+  createdPurchaseReturns PurchaseReturn[]
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model EmployeeProfile {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  fatherName    String?
+  address       String?
+  city          String?
+  state         String?
+  pincode       String?
+  monthlySalary Float?
+  salaryDate    Int?     // Day of month (1-31)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Package {
+  id             String   @id @default(uuid())
+  packageName    String
+  description    String?
+  durationMonths Int      // 1, 3, 6, 12, 24
+  amount         Float    // 0 for Free Trial
+  isFreeTrial    Boolean  @default(false)
+  status         AccountStatus @default(ACTIVE)
+
+  tenants        Tenant[]
+  subscriptions  SubscriptionHistory[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model SubscriptionHistory {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  packageId      String
+  package        Package  @relation(fields: [packageId], references: [id])
+  
+  amount         Float
+  paymentMethod  PaymentMethod @default(CARD)
+  paymentStatus  String   // SUCCESS, FAILED, PENDING
+  transactionId  String?
+  startDate      DateTime
+  expiryDate     DateTime
+
+  createdAt      DateTime @default(now())
+}
+
+model Category {
+  id            String        @id @default(uuid())
+  name          String        @unique
+  description   String?
+  
+  subCategories SubCategory[]
+  products      Product[]
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model SubCategory {
+  id               String            @id @default(uuid())
+  categoryId       String
+  category         Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  
+  name             String
+  description      String?
+  enableExpiryDate Boolean           @default(false)
+
+  additionalFields AdditionalField[]
+  products         Product[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([categoryId, name])
+}
+
+model AdditionalField {
+  id            String       @id @default(uuid())
+  subCategoryId String
+  subCategory   SubCategory  @relation(fields: [subCategoryId], references: [id], onDelete: Cascade)
+  
+  labelName     String
+  inputType     InputType    @default(TEXT)
+  isRequired    Boolean      @default(false)
+  status        AccountStatus @default(ACTIVE)
+
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+model Product {
+  id               String       @id @default(uuid())
+  tenantId         String
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  categoryId       String
+  category         Category     @relation(fields: [categoryId], references: [id])
+  
+  subCategoryId    String
+  subCategory      SubCategory  @relation(fields: [subCategoryId], references: [id])
+  
+  name             String
+  sku              String?
+  barcode          String?
+  brand            String?
+  unit             String?        @default("Pcs")
+  purchasePrice    Float          @default(0)
+  sellingPrice     Float
+  mrp              Float?
+  taxType          String?        @default("GST")
+  discountPercent  Float          @default(0)
+  taxId            String?
+  tax              Tax?           @relation(fields: [taxId], references: [id])
+  
+  openingStock     Int            @default(0)
+  currentStock     Int            @default(0)
+  maxStockLevel    Int            @default(0)
+  minStockLevel    Int            @default(5)
+  stockAlertQuantity Int          @default(5)
+  enableStockAlert Boolean        @default(true)
+  
+  productImage     String?
+  description      String?
+  expiryDate       DateTime?
+  additionalValues Json?          // Key-Value map for sub-category dynamic fields
+  
+  status           AccountStatus  @default(ACTIVE)
+
+  billItems           BillItem[]
+  stockHistory        StockHistory[]
+  purchaseItems       PurchaseItem[]
+  purchaseReturnItems PurchaseReturnItem[]
+
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([tenantId, sku])
+  @@unique([tenantId, barcode])
+}
+
+model Customer {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name                String
+  mobileNumber        String
+  email               String?
+  address             String?
+  city                String?
+  state               String?
+  country             String?  @default("India")
+  pincode             String?
+  
+  totalInvoices       Int      @default(0)
+  totalPurchaseAmount Float    @default(0)
+  totalPaidAmount     Float    @default(0)
+  totalDueAmount      Float    @default(0)
+  lastPurchaseDate    DateTime?
+
+  bills               Bill[]
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([tenantId, mobileNumber])
+}
+
+model Tax {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name        String
+  percentage  Float
+  type        TaxType  @default(PERCENTAGE)
+  status      AccountStatus @default(ACTIVE)
+
+  products    Product[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Bill {
+  id                String        @id @default(uuid())
+  tenantId          String
+  tenant            Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  invoiceNumber     String
+  customerId        String
+  customer          Customer      @relation(fields: [customerId], references: [id])
+  
+  subtotal          Float
+  totalTaxAmount    Float         @default(0)
+  
+  discountType      DiscountType  @default(NONE)
+  discountValue     Float         @default(0)
+  discountAmount    Float         @default(0)
+  
+  grandTotal        Float
+  paidAmount        Float         @default(0)
+  dueAmount         Float         @default(0)
+  
+  status            BillStatus    @default(PAID)
+  paymentMethod     PaymentMethod @default(CASH)
+  
+  generatedByUserId String
+  generatedBy       User          @relation("BillGeneratedBy", fields: [generatedByUserId], references: [id])
+  
+  items             BillItem[]
+  returns           BillReturn[]
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([tenantId, invoiceNumber])
+}
+
+model BillItem {
+  id               String   @id @default(uuid())
+  billId           String
+  bill             Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  
+  productId        String
+  product          Product  @relation(fields: [productId], references: [id])
+  
+  sku              String?
+  quantity         Int
+  returnedQuantity Int      @default(0)
+  unitPrice        Float
+  discountAmount   Float    @default(0)
+  taxPercent       Float    @default(0)
+  taxAmount        Float    @default(0)
+  lineTotal        Float
+
+  createdAt        DateTime @default(now())
+}
+
+model BillReturn {
+  id                String   @id @default(uuid())
+  billId            String
+  bill              Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  
+  productId         String
+  returnQuantity    Int
+  returnAmount      Float
+  reason            String?
+  
+  processedByUserId String
+  processedBy       User     @relation(fields: [processedByUserId], references: [id])
+
+  createdAt         DateTime @default(now())
+}
+
+model StockHistory {
+  id               String      @id @default(uuid())
+  tenantId         String
+  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  productId        String
+  product          Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  previousStock    Int
+  addedRemovedQty  Int         // Positive for addition, negative for deduction
+  updatedStock     Int
+  reason           StockReason
+  
+  updatedByUserId  String
+  updatedByUser    User        @relation(fields: [updatedByUserId], references: [id])
+
+  createdAt        DateTime    @default(now())
+}
+
+model Supplier {
+  id               String            @id @default(uuid())
+  tenantId         String
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name             String
+  companyName      String?
+  mobileNumber     String
+  email            String?
+  pan              String?
+  gstin            String?
+  address          String?
+  city             String?
+  state            String?
+  pincode          String?
+  status           AccountStatus     @default(ACTIVE)
+  
+  supplierType     String?           @default("Local")
+  creditLimit      Float             @default(0)
+  paymentTerms     String?           @default("30 Days")
+  
+  totalPurchases   Float             @default(0)
+  totalPaid        Float             @default(0)
+  outstandingDue   Float             @default(0)
+
+  purchaseInvoices PurchaseInvoice[]
+  supplierPayments SupplierPayment[]
+  purchaseReturns  PurchaseReturn[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model SupplierPayment {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  supplierId      String
+  supplier        Supplier      @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  
+  amount          Float
+  paymentDate     DateTime      @default(now())
+  paymentMethod   PaymentMethod @default(CASH)
+  referenceNumber String?
+  notes           String?
+  
+  createdById     String
+  createdBy       User          @relation(fields: [createdById], references: [id])
+
+  createdAt       DateTime      @default(now())
+}
+
+model PurchaseInvoice {
+  id                    String         @id @default(uuid())
+  tenantId              String
+  tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  supplierId            String
+  supplier              Supplier       @relation(fields: [supplierId], references: [id])
+  
+  purchaseNumber        String
+  supplierInvoiceNumber String?
+  invoiceDate           DateTime       @default(now())
+  dueDate               DateTime?
+  paymentTerms          String?
+  notes                 String?
+  subtotal              Float
+  taxAmount             Float          @default(0)
+  discountAmount        Float          @default(0)
+  cgstAmount            Float          @default(0)
+  sgstAmount            Float          @default(0)
+  igstAmount            Float          @default(0)
+  otherCharges          Float          @default(0)
+  roundOff              Float          @default(0)
+  totalAmount           Float
+  paidAmount            Float          @default(0)
+  dueAmount             Float          @default(0)
+  paymentStatus         BillStatus     @default(PAID)
+  purchaseStatus        PurchaseStatus @default(CONFIRMED)
+
+  purchaseType          String?        @default("Local Purchase")
+  paymentMethod         PaymentMethod  @default(CASH)
+  bankAccount           String?
+  referenceNumber       String?
+  attachments           Json?          // Array of file URLs
+  
+  items                 PurchaseItem[]
+  returns               PurchaseReturn[]
+
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@unique([tenantId, purchaseNumber])
+}
+
+model PurchaseItem {
+  id                String          @id @default(uuid())
+  purchaseInvoiceId String
+  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  
+  productId         String
+  product           Product         @relation(fields: [productId], references: [id])
+  
+  sku               String?
+  unit              String?         @default("Nos")
+  quantity          Int
+  unitPurchasePrice Float
+  discountPercent   Float           @default(0)
+  discountAmount    Float           @default(0)
+  taxPercent        Float           @default(0)
+  taxAmount         Float           @default(0)
+  totalAmount       Float
+
+  createdAt         DateTime        @default(now())
+}
+
+model PurchaseReturn {
+  id                    String               @id @default(uuid())
+  tenantId              String
+  tenant                Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  returnNumber          String
+  returnType            String               @default("PURCHASE_RETURN") // PURCHASE_RETURN, PURCHASE_CANCELLATION
+  supplierId            String
+  supplier              Supplier             @relation(fields: [supplierId], references: [id])
+  
+  purchaseInvoiceId     String
+  purchaseInvoice       PurchaseInvoice      @relation(fields: [purchaseInvoiceId], references: [id])
+  
+  returnDate            DateTime             @default(now())
+  returnReason          String?
+  referenceNotes        String?
+  returnAgainst         String               @default("PARTIAL_ITEMS") // PARTIAL_ITEMS, FULL_RETURN
+  warehouse             String?              @default("Main Warehouse")
+  
+  subtotal              Float
+  discountAmount        Float                @default(0)
+  taxableAmount         Float                @default(0)
+  cgstAmount            Float                @default(0)
+  sgstAmount            Float                @default(0)
+  igstAmount            Float                @default(0)
+  otherCharges          Float                @default(0)
+  roundOff              Float                @default(0)
+  totalReturnAmount     Float
+  
+  refundType            String               @default("CASH_REFUND") // CASH_REFUND, ADJUST_IN_NEXT_PURCHASE, BANK_TRANSFER
+  refundAmount          Float                @default(0)
+  paymentMethod         PaymentMethod        @default(CASH)
+  bankAccount           String?
+  
+  createdById           String
+  createdBy             User                 @relation(fields: [createdById], references: [id])
+  
+  items                 PurchaseReturnItem[]
+
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  
+  @@unique([tenantId, returnNumber])
+}
+
+model PurchaseReturnItem {
+  id               String         @id @default(uuid())
+  purchaseReturnId String
+  purchaseReturn   PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  
+  productId        String
+  product          Product        @relation(fields: [productId], references: [id])
+  
+  sku              String?
+  unit             String?        @default("Nos")
+  purchasedQty     Int
+  returnQty        Int
+  unitPrice        Float
+  discountPercent  Float          @default(0)
+  discountAmount   Float          @default(0)
+  taxPercent       Float          @default(0)
+  taxAmount        Float          @default(0)
+  totalAmount      Float
+
+  createdAt        DateTime       @default(now())
+}
+
+model SupportTicket {
+  id           String         @id @default(uuid())
+  ticketNumber String         @unique
+  
+  tenantId     String
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  subject      String
+  priority     TicketPriority @default(MEDIUM)
+  status       TicketStatus   @default(OPEN)
+
+  messages     TicketMessage[]
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model TicketMessage {
+  id            String        @id @default(uuid())
+  ticketId      String
+  ticket        SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  senderUserId  String
+  sender        User          @relation(fields: [senderUserId], references: [id])
+  
+  message       String
+  attachmentUrl String?
+  isFromAdmin   Boolean       @default(false)
+
+  createdAt     DateTime      @default(now())
+}
+
+model Policy {
+  id        String   @id @default(uuid())
+  type      String   @unique // TERMS, PRIVACY, RETURN_REFUND
+  title     String
+  content   String
+  updatedAt DateTime @updatedAt
+}
+
+model ContactInfo {
+  id             String   @id @default(uuid())
+  contactNumber  String
+  whatsappNumber String?
+  emailAddress   String?
+  address        String?
+  socialMedia    Json?    // Array or Map of links
+  updatedAt      DateTime @updatedAt
+}
+
+model OTPVerification {
+  id           String    @id @default(uuid())
+  mobileNumber String    @unique
+  otpCode      String
+  expiresAt    DateTime
+  isVerified   Boolean   @default(false)
+  attempts     Int       @default(0)
+  lockedUntil  DateTime?
+  lastSentAt   DateTime  @default(now())
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}

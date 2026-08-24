@@ -1,0 +1,1310 @@
+{
+  "info": {
+    "_postman_id": "multi-tenant-billing-saas-complete-v2.0.0",
+    "name": "Multi-Tenant Billing SaaS - Complete Super Admin & Vendor API Collection",
+    "description": "Comprehensive 100% coverage Postman Collection for the Multi-Tenant Billing SaaS Platform Backend API v1. Includes complete Super Admin Module (Dashboard, Tenants, Categories, Sub-Categories, Dynamic Custom Fields, SaaS Packages, CMS, Support Tickets) and complete Vendor & Employee Store Module (Phone OTP, Business Workspace, Store Taxes, Products, Suppliers, Double-Entry Ledgers, Purchase Bills & Returns, Customers, POS Billing, Stock Adjustments, Reports, Subscriptions).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "vendorToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "employeeToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tenantId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "categoryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "subCategoryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "fieldId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "productId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "billId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "supplierId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "purchaseId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "packageId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taxId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ticketId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "👑 SUPER ADMIN MODULE",
+      "item": [
+        {
+          "name": "1. Admin Auth & Dashboard",
+          "item": [
+            {
+              "name": "1. Super Admin Email Login",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && (jsonData.data.accessToken || jsonData.data.token)) {",
+                      "    var t = jsonData.data.accessToken || jsonData.data.token;",
+                      "    pm.collectionVariables.set('adminToken', t);",
+                      "    pm.collectionVariables.set('accessToken', t);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"admin@softfyr.com\",\n  \"password\": \"admin123\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/admin/login",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["auth", "admin", "login"]
+                }
+              }
+            },
+            {
+              "name": "2. Get Super Admin Platform Dashboard Analytics",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/dashboard",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "dashboard"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Tenant Stores Management",
+          "item": [
+            {
+              "name": "1. List & Search Platform Tenant Stores",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/tenants?status=FREE_TRIAL&search=Gupta",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "tenants"]
+                }
+              }
+            },
+            {
+              "name": "2. Get Tenant Complete Audit Details",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/tenants/{{tenantId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "tenants", "{{tenantId}}"]
+                }
+              }
+            },
+            {
+              "name": "3. Override Tenant Subscription (Upgrade / Extend)",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"extensionDays\": 30,\n  \"subscriptionStatus\": \"UPGRADED\",\n  \"amount\": 999,\n  \"paymentMethod\": \"UPI\",\n  \"transactionId\": \"ADMIN_OVERRIDE_101\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/tenants/{{tenantId}}/subscription",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "tenants", "{{tenantId}}", "subscription"]
+                }
+              }
+            },
+            {
+              "name": "4. Suspend / Reactivate Tenant Store Workspace",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"accountStatus\": \"SUSPENDED\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/tenants/{{tenantId}}/status",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "tenants", "{{tenantId}}", "status"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Master Categories & Sub-Categories",
+          "item": [
+            {
+              "name": "1. Create Master Category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && jsonData.data.id) {",
+                      "    pm.collectionVariables.set('categoryId', jsonData.data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Electronics & Gadgets\",\n  \"description\": \"Smartphones, Laptops, Accessories & Peripherals\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/categories",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "categories"]
+                }
+              }
+            },
+            {
+              "name": "2. Get All Master Categories",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/categories?search=Elect",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "categories"]
+                }
+              }
+            },
+            {
+              "name": "3. Get Master Category By ID",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/categories/{{categoryId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "categories", "{{categoryId}}"]
+                }
+              }
+            },
+            {
+              "name": "4. Update Master Category",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"description\": \"Updated Electronics Category Description\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/categories/{{categoryId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "categories", "{{categoryId}}"]
+                }
+              }
+            },
+            {
+              "name": "5. Delete Master Category",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/categories/{{categoryId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "categories", "{{categoryId}}"]
+                }
+              }
+            },
+            {
+              "name": "6. Create Sub-Category (With Expiry & Custom Fields)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && jsonData.data.id) {",
+                      "    pm.collectionVariables.set('subCategoryId', jsonData.data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"name\": \"Smartphones\",\n  \"description\": \"Mobile phones and tablets\",\n  \"enableExpiryDate\": false,\n  \"additionalFields\": [\n    {\n      \"labelName\": \"IMEI 1\",\n      \"inputType\": \"TEXT\",\n      \"isRequired\": true\n    },\n    {\n      \"labelName\": \"RAM\",\n      \"inputType\": \"TEXT\",\n      \"isRequired\": false\n    }\n  ]\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/sub-categories",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "sub-categories"]
+                }
+              }
+            },
+            {
+              "name": "7. Get All Sub-Categories",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/sub-categories?categoryId={{categoryId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "sub-categories"]
+                }
+              }
+            },
+            {
+              "name": "8. Add Dynamic Additional Field",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && jsonData.data.id) {",
+                      "    pm.collectionVariables.set('fieldId', jsonData.data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"labelName\": \"Battery Capacity (mAh)\",\n  \"inputType\": \"NUMBER\",\n  \"isRequired\": false,\n  \"status\": \"ACTIVE\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/sub-categories/{{subCategoryId}}/fields",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "sub-categories", "{{subCategoryId}}", "fields"]
+                }
+              }
+            },
+            {
+              "name": "9. Update Dynamic Additional Field",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"isRequired\": true\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/sub-categories/fields/{{fieldId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "sub-categories", "fields", "{{fieldId}}"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. SaaS Packages Management",
+          "item": [
+            {
+              "name": "1. Create SaaS Package",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && jsonData.data.id) {",
+                      "    pm.collectionVariables.set('packageId', jsonData.data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"packageName\": \"Pro Retailer Yearly Plan\",\n  \"description\": \"Full Inventory, POS Billing, Supplier Ledgers & Staff Access\",\n  \"durationMonths\": 12,\n  \"amount\": 8999,\n  \"isFreeTrial\": false,\n  \"status\": \"ACTIVE\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/packages",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "packages"]
+                }
+              }
+            },
+            {
+              "name": "2. Get All SaaS Packages",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/packages",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "packages"]
+                }
+              }
+            },
+            {
+              "name": "3. Update SaaS Package",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amount\": 7999\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/packages/{{packageId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "packages", "{{packageId}}"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. CMS Policies & Support Tickets",
+          "item": [
+            {
+              "name": "1. Get CMS Policies",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/policies",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "policies"]
+                }
+              }
+            },
+            {
+              "name": "2. Get Platform Support Tickets",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/support/tickets",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "support", "tickets"]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "🏪 VENDOR & EMPLOYEE MODULE",
+      "item": [
+        {
+          "name": "1. Phone OTP Auth & Staff Onboarding",
+          "item": [
+            {
+              "name": "1. Send Login OTP (SMS)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mobileNumber\": \"9876543210\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/send-otp",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["auth", "send-otp"]
+                }
+              }
+            },
+            {
+              "name": "2. Verify OTP Login (Auto Vendor Onboarding)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && (jsonData.data.accessToken || jsonData.data.token)) {",
+                      "    var t = jsonData.data.accessToken || jsonData.data.token;",
+                      "    var r = jsonData.data.refreshToken;",
+                      "    pm.collectionVariables.set('vendorToken', t);",
+                      "    pm.collectionVariables.set('accessToken', t);",
+                      "    if (r) pm.collectionVariables.set('refreshToken', r);",
+                      "    if (jsonData.data.tenant && jsonData.data.tenant.id) {",
+                      "        pm.collectionVariables.set('tenantId', jsonData.data.tenant.id);",
+                      "    }",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mobileNumber\": \"9876543210\",\n  \"otpCode\": \"123456\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/verify-otp",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["auth", "verify-otp"]
+                }
+              }
+            },
+            {
+              "name": "3. Register Counter Staff / Employee",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Suresh Kumar\",\n  \"mobileNumber\": \"9870001111\",\n  \"password\": \"Staff@1234\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/employee/register",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["auth", "employee", "register"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Store Workspace & Taxes",
+          "item": [
+            {
+              "name": "1. Get Vendor Dashboard Real-Time KPIs",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/business/dashboard",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["business", "dashboard"]
+                }
+              }
+            },
+            {
+              "name": "2. Initial Store Profile Setup",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"businessName\": \"Gupta Hardware & Electronics\",\n  \"businessType\": \"Retail Hardware Store\",\n  \"ownerName\": \"Ramesh Gupta\",\n  \"mobileNumber\": \"9876543210\",\n  \"email\": \"ramesh@guptahardware.com\",\n  \"gstNumber\": \"09AAAAA0000A1Z5\",\n  \"panNumber\": \"ABCDE1234F\",\n  \"businessAddress\": \"Shop 14, Main Market Road\",\n  \"city\": \"Noida\",\n  \"state\": \"Uttar Pradesh\",\n  \"pincode\": \"201301\",\n  \"otherInvoiceInfo\": \"Goods once sold cannot be returned without receipt.\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/business/create-profile",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["business", "create-profile"]
+                }
+              }
+            },
+            {
+              "name": "3. Create Store GST Tax Slab",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && jsonData.data.id) {",
+                      "    pm.collectionVariables.set('taxId', jsonData.data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"GST 18%\",\n  \"percentage\": 18,\n  \"type\": \"PERCENTAGE\",\n  \"status\": \"ACTIVE\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/business/taxes",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["business", "taxes"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Products & Stock Catalog",
+          "item": [
+            {
+              "name": "1. Create Product (With Custom Fields & Expiry)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && jsonData.data.id) {",
+                      "    pm.collectionVariables.set('productId', jsonData.data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"subCategoryId\": \"{{subCategoryId}}\",\n  \"name\": \"Logitech Wireless Mouse M185\",\n  \"brand\": \"Logitech\",\n  \"unit\": \"PCS\",\n  \"sellingPrice\": 650,\n  \"purchasePrice\": 450,\n  \"openingStock\": 50,\n  \"minStockLevel\": 5,\n  \"additionalValues\": {\n    \"IMEI 1\": \"864291048201948\",\n    \"RAM\": \"N/A\"\n  }\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/products",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["products"]
+                }
+              }
+            },
+            {
+              "name": "2. Get Paginated Product Catalog",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/products?page=1&limit=10&stockStatus=IN_STOCK",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["products"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Supplier Directory & Account Ledgers",
+          "item": [
+            {
+              "name": "1. Create Supplier",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && jsonData.data.id) {",
+                      "    pm.collectionVariables.set('supplierId', jsonData.data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Royal Wholesale Distributors\",\n  \"companyName\": \"Royal Electronics Pvt Ltd\",\n  \"mobileNumber\": \"9811223344\",\n  \"email\": \"sales@royalelectronics.com\",\n  \"gstin\": \"07AAAAA1111A1Z1\",\n  \"pan\": \"AAAAA1111A\",\n  \"address\": \"Plot 12, Industrial Area\",\n  \"city\": \"Delhi\",\n  \"state\": \"Delhi\",\n  \"pincode\": \"110020\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/suppliers",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["suppliers"]
+                }
+              }
+            },
+            {
+              "name": "2. Get Supplier Double-Entry Account Ledger",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/suppliers/{{supplierId}}/ledger",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["suppliers", "{{supplierId}}", "ledger"]
+                }
+              }
+            },
+            {
+              "name": "3. Record Supplier Direct Payment",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amount\": 5000,\n  \"paymentMethod\": \"UPI\",\n  \"referenceNumber\": \"UPI-TXN-998877\",\n  \"notes\": \"Direct payment against supplier account dues\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/suppliers/{{supplierId}}/payments",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["suppliers", "{{supplierId}}", "payments"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Purchase Bills & Inwarding",
+          "item": [
+            {
+              "name": "1. Create Purchase Bill (DRAFT or CONFIRMED)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && jsonData.data.id) {",
+                      "    pm.collectionVariables.set('purchaseId', jsonData.data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"supplierId\": \"{{supplierId}}\",\n  \"supplierInvoiceNumber\": \"INV-ROYAL-9081\",\n  \"purchaseStatus\": \"DRAFT\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 20,\n      \"unitPurchasePrice\": 450,\n      \"discountAmount\": 0,\n      \"taxPercent\": 18\n    }\n  ],\n  \"paidAmount\": 2000,\n  \"paymentMethod\": \"BANK\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/purchases",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["purchases"]
+                }
+              }
+            },
+            {
+              "name": "2. Confirm DRAFT Purchase Bill",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/purchases/{{purchaseId}}/confirm",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["purchases", "{{purchaseId}}", "confirm"]
+                }
+              }
+            },
+            {
+              "name": "3. Export Purchase Invoices Dataset",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/purchases/export",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["purchases", "export"]
+                }
+              }
+            },
+            {
+              "name": "4. Record Payment Modal on Purchase Bill",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amount\": 3000,\n  \"paymentMethod\": \"UPI\",\n  \"referenceNumber\": \"UPI-PAY-88221\",\n  \"notes\": \"Payment against purchase bill\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/purchases/{{purchaseId}}/payments",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["purchases", "{{purchaseId}}", "payments"]
+                }
+              }
+            },
+            {
+              "name": "5. Process Product Return on Purchase Bill",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"returnItems\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"returnQuantity\": 2\n    }\n  ],\n  \"reason\": \"Defective packaging\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/purchases/{{purchaseId}}/return",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["purchases", "{{purchaseId}}", "return"]
+                }
+              }
+            },
+            {
+              "name": "6. Cancel Purchase Bill",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/purchases/{{purchaseId}}/cancel",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["purchases", "{{purchaseId}}", "cancel"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. POS Billing Checkout & Invoices",
+          "item": [
+            {
+              "name": "1. Create POS Customer Invoice Bill",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.success && jsonData.data.id) {",
+                      "    pm.collectionVariables.set('billId', jsonData.data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customerName\": \"Sunil Sharma\",\n  \"customerMobile\": \"9998887770\",\n  \"paymentMethod\": \"UPI\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 1,\n      \"unitPrice\": 650,\n      \"discount\": 0\n    }\n  ],\n  \"paidAmount\": 650\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/bills",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["bills"]
+                }
+              }
+            },
+            {
+              "name": "2. Get Sales Bills List",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/bills?page=1&limit=10",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["bills"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Inventory Adjustments & Stock Logs",
+          "item": [
+            {
+              "name": "1. Get Stock Audit Trail Logs",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/inventory/logs",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["inventory", "logs"]
+                }
+              }
+            },
+            {
+              "name": "2. Manual Stock Adjustment (+/-)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"adjustmentQuantity\": 10,\n  \"reason\": \"PHYSICAL_AUDIT\",\n  \"notes\": \"Physical stock verification count add\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/inventory/adjust",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["inventory", "adjust"]
+                }
+              }
+            },
+            {
+              "name": "3. Get Low Stock Alert Products",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/inventory/low-stock",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["inventory", "low-stock"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. SaaS Subscription Packages & Renewal",
+          "item": [
+            {
+              "name": "1. Get Available SaaS Subscription Packages",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/subscription/packages",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["subscription", "packages"]
+                }
+              }
+            },
+            {
+              "name": "2. Choose Initial Package (Onboarding)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"packageId\": \"{{packageId}}\",\n  \"paymentMethod\": \"CARD\",\n  \"transactionId\": \"PAY_SUB_887711\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/subscription/choose-package",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["subscription", "choose-package"]
+                }
+              }
+            },
+            {
+              "name": "3. Upgrade SaaS Subscription Plan",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"packageId\": \"{{packageId}}\",\n  \"paymentMethod\": \"UPI\",\n  \"transactionId\": \"PAY_UPGRADE_990022\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/subscription/upgrade",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["subscription", "upgrade"]
+                }
+              }
+            },
+            {
+              "name": "4. Get Vendor Subscription Payment History",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{vendorToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/subscription/history",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["subscription", "history"]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
