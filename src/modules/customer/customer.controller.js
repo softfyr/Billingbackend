@@ -10,28 +10,28 @@ export const handleFindOrCreateCustomer = asyncHandler(async (req, res) => {
     name,
     { email, address, city, state, pincode }
   );
-  return res.status(200).json(new ApiResponse(200, result, 'Customer lookup successful.'));
+  return ApiResponse.success(res, result, 'Customer lookup successful.');
 });
 
 export const handleGetCustomers = asyncHandler(async (req, res) => {
   const { search } = req.query;
   const customers = await customerService.getCustomers(req.tenantId, search);
-  return res.status(200).json(new ApiResponse(200, customers, 'Customer list fetched successfully.'));
+  return ApiResponse.success(res, customers, 'Customer list fetched successfully.');
 });
 
 export const handleGetCustomerDetails = asyncHandler(async (req, res) => {
   const details = await customerService.getCustomerDetails(req.tenantId, req.params.id);
-  return res.status(200).json(new ApiResponse(200, details, 'Customer details fetched successfully.'));
+  return ApiResponse.success(res, details, 'Customer details fetched successfully.');
 });
 
 export const handleUpdateCustomer = asyncHandler(async (req, res) => {
   const updated = await customerService.updateCustomer(req.tenantId, req.params.id, req.body);
-  return res.status(200).json(new ApiResponse(200, updated, 'Customer updated successfully.'));
+  return ApiResponse.success(res, updated, 'Customer updated successfully.');
 });
 
 export const handleDeleteCustomer = asyncHandler(async (req, res) => {
   await customerService.deleteCustomer(req.tenantId, req.params.id);
-  return res.status(200).json(new ApiResponse(200, null, 'Customer deleted successfully.'));
+  return ApiResponse.success(res, null, 'Customer deleted successfully.');
 });
 
 import { exportToExcel, exportToCSV } from '../../utils/export.utility.js';
@@ -59,6 +59,6 @@ export const handleExportCustomers = asyncHandler(async (req, res) => {
     return exportToCSV(res, { filename: 'customers_directory', columns, data: exportData });
   }
 
-  return res.status(200).json(new ApiResponse(200, exportData, 'Customers export dataset generated successfully.'));
+  return ApiResponse.success(res, exportData, 'Customers export dataset generated successfully.');
 });
 

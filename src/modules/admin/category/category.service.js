@@ -21,7 +21,8 @@ export const getCategories = async (searchQuery) => {
     const q = searchQuery.trim();
     where.OR = [
       { name: { contains: q, mode: 'insensitive' } },
-      { description: { contains: q, mode: 'insensitive' } }
+      { description: { contains: q, mode: 'insensitive' } },
+      { subCategories: { some: { name: { contains: q, mode: 'insensitive' } } } }
     ];
   }
 
@@ -83,11 +84,40 @@ export const updateCategory = async (categoryId, data = {}) => {
 };
 
 export const deleteCategory = async (categoryId) => {
-  const category = await prisma.category.findUnique({ where: { id: categoryId } });
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    include: {
+      subCategories: { select: { id: true } }
+    }
+  });
   if (!category) throw new ApiError(404, 'Category not found.');
 
-  await prisma.category.delete({ where: { id: categoryId } });
-  return { success: true, message: `Category '${category.name}' deleted successfully.` };
+  const subCategoryIds = (category.subCategories || []).map((s) => s.id);
+  const whereOr = [{ categoryId }];
+  if (subCategoryIds.length > 0) {
+    whereOr.push({ subCategoryId: { in: subCategoryIds } });
+  }
+
+  const productCount = await prisma.product.count({
+    where: { OR: whereOr }
+  });
+
+  if (productCount > 0) {
+    throw new ApiError(
+      400,
+      `Cannot delete Category '${category.name}' because ${productCount} product(s) are linked to it or its sub-categories. Please delete or reassign those products first.`
+    );
+  }
+
+  try {
+    await prisma.category.delete({ where: { id: categoryId } });
+    return { success: true, message: `Category '${category.name}' deleted successfully.` };
+  } catch (error) {
+    if (error.code === 'P2003' || error.message?.includes('foreign key constraint')) {
+      throw new ApiError(400, `Cannot delete Category '${category.name}' because products are referencing it.`);
+    }
+    throw error;
+  }
 };
 
 
@@ -201,8 +231,26 @@ export const deleteSubCategory = async (subCategoryId) => {
   const subCategory = await prisma.subCategory.findUnique({ where: { id: subCategoryId } });
   if (!subCategory) throw new ApiError(404, 'Sub-Category not found.');
 
-  await prisma.subCategory.delete({ where: { id: subCategoryId } });
-  return { success: true, message: `Sub-Category '${subCategory.name}' deleted successfully.` };
+  const productCount = await prisma.product.count({
+    where: { subCategoryId }
+  });
+
+  if (productCount > 0) {
+    throw new ApiError(
+      400,
+      `Cannot delete Sub-Category '${subCategory.name}' because ${productCount} product(s) are linked to it. Please delete or reassign those products first.`
+    );
+  }
+
+  try {
+    await prisma.subCategory.delete({ where: { id: subCategoryId } });
+    return { success: true, message: `Sub-Category '${subCategory.name}' deleted successfully.` };
+  } catch (error) {
+    if (error.code === 'P2003' || error.message?.includes('foreign key constraint')) {
+      throw new ApiError(400, `Cannot delete Sub-Category '${subCategory.name}' because products are referencing it.`);
+    }
+    throw error;
+  }
 };
 
 

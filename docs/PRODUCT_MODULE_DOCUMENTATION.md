@@ -37,6 +37,7 @@ model Product {
   name               String
   sku                String?
   barcode            String?
+  hsnCode            String?       // HSN / SAC Code
   brand              String?
   unit               String?       @default("Pcs")
   purchasePrice      Float         @default(0)
@@ -104,7 +105,7 @@ Mounted under `/api/v1/products` requiring JWT Bearer Authentication (`authentic
 - `summary.totalStockValue`: Sum of $(\text{currentStock} \times \text{purchasePrice})$ across active items.
 
 ### Filter Options:
-- `search`: Searches product name, SKU, barcode, and brand.
+- `search`: Searches product name, SKU, barcode, HSN code, and brand.
 - `categoryId`: Filter by category ID.
 - `subCategoryId`: Filter by subcategory ID.
 - `brand`: Filter by brand string.
@@ -124,6 +125,7 @@ Mounted under `/api/v1/products` requiring JWT Bearer Authentication (`authentic
   "name": "Dell Inspiron 15 Laptop",
   "sku": "DL-IN15-001",
   "barcode": "8906123450012",
+  "hsnCode": "84713010",
   "brand": "Dell",
   "unit": "Nos",
   "purchasePrice": 40000,

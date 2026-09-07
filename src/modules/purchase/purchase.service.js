@@ -1,6 +1,38 @@
+
+const enrichInvoiceItemMultiUnit = (item) => {
+  const p = item.product || {};
+  const purchaseUnit = item.unit || 'Nos';
+  const isSec = Boolean(p.hasSecondaryUnit && p.secondaryUnit && purchaseUnit === p.secondaryUnit);
+  const factor = isSec ? (Number(p.conversionFactor) || 1) : 1;
+  const baseQty = item.quantity * factor;
+  const baseUnit = p.unit || 'Pcs';
+  const basePrice = factor > 0 ? (item.unitPurchasePrice / factor) : item.unitPurchasePrice;
+  const subtotal = item.quantity * item.unitPurchasePrice;
+
+  return {
+    ...item,
+    purchaseUnit,
+    purchasePrice: item.unitPurchasePrice,
+    conversionFactor: factor,
+    baseQuantity: baseQty,
+    baseUnit,
+    baseUnitPrice: basePrice,
+    subtotal
+  };
+};
+
+const enrichInvoiceMultiUnit = (invoice) => {
+  if (!invoice) return invoice;
+  if (Array.isArray(invoice.items)) {
+    invoice.items = invoice.items.map(enrichInvoiceItemMultiUnit);
+  }
+  return invoice;
+};
+
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../utils/apiError.js';
 import { getPaginationParams, formatPaginatedResult } from '../../utils/pagination.utility.js';
+import { createProduct } from '../product/product.service.js';
 
 const sanitizeEnumMethod = (method) => {
   const valid = ['CASH', 'UPI', 'CARD', 'OTHER'];
@@ -53,12 +85,20 @@ export const createPurchaseInvoice = async (tenantId, userId, data) => {
 
     // 2. Process Purchase Items
     for (const item of items) {
-      if (!item.productId) {
+      let targetProductId = item.productId;
+      const npData = item.newProductData || item.productData;
+
+      if (!targetProductId && npData) {
+        const createdProd = await createProduct(tenantId, userId, npData);
+        targetProductId = createdProd.id;
+      }
+
+      if (!targetProductId) {
         throw new ApiError(400, 'Product ID is required for each purchase line item.');
       }
 
-      const product = await tx.product.findFirst({ where: { id: item.productId, tenantId } });
-      if (!product) throw new ApiError(404, `Product not found for ID ${item.productId}`);
+      const product = await tx.product.findFirst({ where: { id: targetProductId, tenantId } });
+      if (!product) throw new ApiError(404, `Product not found for ID ${targetProductId}`);
 
       const qty = parseInt(item.quantity) || 1;
       const price = parseFloat(item.unitPurchasePrice) || 0;
@@ -69,12 +109,46 @@ export const createPurchaseInvoice = async (tenantId, userId, data) => {
       }
       const itemTaxPct = parseFloat(item.taxPercent) || 0;
 
-      const lineRawTotal = qty * price;
-      const lineTaxable = Math.max(0, lineRawTotal - itemDisc);
-      const lineTaxAmt = (lineTaxable * itemTaxPct) / 100;
-      const lineGrandTotal = lineTaxable + lineTaxAmt;
+      const purchaseUnit = item.unit || item.purchaseUnit || product.secondaryUnit || product.unit || 'Nos';
+      const isSecondaryUnit = Boolean(product.hasSecondaryUnit && product.secondaryUnit && purchaseUnit === product.secondaryUnit);
+      const conversionFactor = isSecondaryUnit ? (Number(product.conversionFactor) || 1) : 1;
 
-      subtotal += lineRawTotal;
+      const baseQuantity = qty * conversionFactor;
+      const baseUnit = product.unit || 'Pcs';
+      const baseUnitPrice = conversionFactor > 0 ? (price / conversionFactor) : price;
+      const lineSubtotal = qty * price;
+
+      const pTaxType = (product.taxType || '').toUpperCase();
+      const iTaxType = (item.taxType || '').toUpperCase();
+      const iTaxMode = (item.taxMode || '').toUpperCase();
+
+      let isInclusive = false;
+      if (['INCLUSIVE', 'GST_INCLUSIVE'].includes(iTaxType) || ['INCLUSIVE', 'GST_INCLUSIVE'].includes(iTaxMode)) {
+        isInclusive = true;
+      } else if (['EXCLUSIVE', 'GST_EXCLUSIVE'].includes(iTaxType) || ['EXCLUSIVE', 'GST_EXCLUSIVE'].includes(iTaxMode)) {
+        isInclusive = false;
+      } else {
+        isInclusive = ['INCLUSIVE', 'GST_INCLUSIVE'].includes(pTaxType);
+      }
+
+      const lineRawTotal = lineSubtotal;
+      const rawLineNet = Math.max(0, lineRawTotal - itemDisc);
+
+      let lineTaxable = rawLineNet;
+      let lineTaxAmt = 0;
+      let lineGrandTotal = rawLineNet;
+
+      if (isInclusive && itemTaxPct > 0) {
+        lineTaxable = Math.round((rawLineNet / (1 + (itemTaxPct / 100))) * 100) / 100;
+        lineTaxAmt = Math.round((rawLineNet - lineTaxable) * 100) / 100;
+        lineGrandTotal = rawLineNet;
+      } else {
+        lineTaxable = Math.round(rawLineNet * 100) / 100;
+        lineTaxAmt = Math.round(((lineTaxable * itemTaxPct) / 100) * 100) / 100;
+        lineGrandTotal = Math.round((lineTaxable + lineTaxAmt) * 100) / 100;
+      }
+
+      subtotal += lineTaxable;
       totalItemDiscountCalculated += itemDisc;
       totalTaxCalculated += lineTaxAmt;
 
@@ -82,9 +156,16 @@ export const createPurchaseInvoice = async (tenantId, userId, data) => {
         productId: product.id,
         product,
         sku: product.sku,
-        unit: item.unit || 'Nos',
+        unit: purchaseUnit,
+        purchaseUnit,
         quantity: qty,
         unitPurchasePrice: price,
+        purchasePrice: price,
+        conversionFactor,
+        baseQuantity,
+        baseUnit,
+        baseUnitPrice,
+        subtotal: lineSubtotal,
         discountPercent: itemDiscPct,
         discountAmount: itemDisc,
         taxPercent: itemTaxPct,
@@ -94,12 +175,17 @@ export const createPurchaseInvoice = async (tenantId, userId, data) => {
     }
 
     const grossDiscount = (parseFloat(clientDiscount) || 0) + totalItemDiscountCalculated;
-    const grossTax = (parseFloat(cgstAmount) || 0) + (parseFloat(sgstAmount) || 0) + (parseFloat(igstAmount) || 0) || totalTaxCalculated;
+    const grossTax = Math.round(totalTaxCalculated * 100) / 100;
     const addCharges = parseFloat(otherCharges) || 0;
     const rOff = parseFloat(roundOff) || 0;
 
     const rawGrandTotal = subtotal - grossDiscount + grossTax + addCharges + rOff;
     const grandTotal = Math.max(0, Math.round(rawGrandTotal * 100) / 100);
+
+    const isIgst = (parseFloat(igstAmount) || 0) > 0;
+    const computedCgst = isIgst ? 0 : Math.round((grossTax / 2) * 100) / 100;
+    const computedSgst = isIgst ? 0 : Math.round((grossTax / 2) * 100) / 100;
+    const computedIgst = isIgst ? grossTax : 0;
 
     const actualPaid = parseFloat(paidAmount) || 0;
     const dueAmount = Math.max(0, grandTotal - actualPaid);
@@ -109,7 +195,8 @@ export const createPurchaseInvoice = async (tenantId, userId, data) => {
     else if (dueAmount > 0 && actualPaid === 0) paymentStatus = 'UNPAID';
 
     const purchaseCount = await tx.purchaseInvoice.count({ where: { tenantId } });
-    const purchaseNumber = `PUR-${String(purchaseCount + 1001)}`;
+    const purchaseHash = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const purchaseNumber = `PUR-${String(purchaseCount + 1001)}-${purchaseHash}`;
 
     // 3. Save Purchase Invoice
     const purchaseInvoice = await tx.purchaseInvoice.create({
@@ -130,9 +217,9 @@ export const createPurchaseInvoice = async (tenantId, userId, data) => {
         subtotal,
         taxAmount: grossTax,
         discountAmount: grossDiscount,
-        cgstAmount: parseFloat(cgstAmount) || 0,
-        sgstAmount: parseFloat(sgstAmount) || 0,
-        igstAmount: parseFloat(igstAmount) || 0,
+        cgstAmount: computedCgst,
+        sgstAmount: computedSgst,
+        igstAmount: computedIgst,
         otherCharges: addCharges,
         roundOff: rOff,
         totalAmount: grandTotal,
@@ -164,14 +251,20 @@ export const createPurchaseInvoice = async (tenantId, userId, data) => {
     // 4. Update Stock & Supplier Dues ONLY IF status is CONFIRMED
     if (isConfirmed) {
       for (const item of preparedItems) {
+        const isSecondary = item.product.hasSecondaryUnit && item.product.secondaryUnit && item.unit === item.product.secondaryUnit;
+        const factor = isSecondary ? (Number(item.product.conversionFactor) || 1) : 1;
+        const qtyInPrimary = item.quantity * factor;
+        const perPiecePrice = isSecondary ? (item.unitPurchasePrice / factor) : item.unitPurchasePrice;
+
         const prevStock = item.product.currentStock;
-        const newStock = prevStock + item.quantity;
+        const newStock = prevStock + qtyInPrimary;
 
         await tx.product.update({
           where: { id: item.productId },
           data: {
             currentStock: newStock,
-            purchasePrice: item.unitPurchasePrice
+            purchasePrice: perPiecePrice,
+            ...(isSecondary ? { secondaryPurchasePrice: item.unitPurchasePrice } : {})
           }
         });
 
@@ -180,7 +273,7 @@ export const createPurchaseInvoice = async (tenantId, userId, data) => {
             tenantId,
             productId: item.productId,
             previousStock: prevStock,
-            addedRemovedQty: item.quantity,
+            addedRemovedQty: qtyInPrimary,
             updatedStock: newStock,
             reason: 'NEW_PURCHASE',
             updatedByUserId: userId
@@ -212,7 +305,7 @@ export const createPurchaseInvoice = async (tenantId, userId, data) => {
       }
     }
 
-    return purchaseInvoice;
+    return enrichInvoiceMultiUnit(purchaseInvoice);
   });
 };
 
@@ -277,7 +370,7 @@ export const getPurchaseInvoices = async (tenantId, filters = {}) => {
 
   // --- KPI Top Summary Banner Aggregations ---
   const totalBillsCount = await prisma.purchaseInvoice.count({ where: { tenantId } });
-  
+
   const aggregates = await prisma.purchaseInvoice.aggregate({
     where: { tenantId, purchaseStatus: { notIn: ['CANCELLED'] } },
     _sum: { totalAmount: true, paidAmount: true, dueAmount: true }
@@ -568,7 +661,8 @@ export const createPurchaseReturn = async (tenantId, userId, data) => {
     const totalReturnAmount = Math.round((returnSubtotal - returnTotalDiscount + returnTotalTax) * 100) / 100;
 
     const returnCount = await tx.purchaseReturn.count({ where: { tenantId } });
-    const returnNumber = `RET-${String(returnCount + 1001)}`;
+    const returnHash = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const returnNumber = `RET-${String(returnCount + 1001)}-${returnHash}`;
 
     // 2. Create PurchaseReturn Record
     const pReturn = await tx.purchaseReturn.create({
@@ -617,11 +711,16 @@ export const createPurchaseReturn = async (tenantId, userId, data) => {
       }
     });
 
-    // 3. Update PurchaseInvoice status
+    // 3. Update PurchaseInvoice status (Fully vs Partially Returned)
+    const allReturned = invoice.items.every(origItem => {
+      const retItem = preparedReturnItems.find(ri => ri.productId === origItem.productId);
+      return retItem && retItem.returnQty >= origItem.quantity;
+    });
+
     await tx.purchaseInvoice.update({
       where: { id: purchaseInvoiceId },
       data: {
-        purchaseStatus: 'PARTIALLY_RETURNED'
+        purchaseStatus: allReturned ? 'FULLY_RETURNED' : 'PARTIALLY_RETURNED'
       }
     });
 
@@ -930,3 +1029,404 @@ export const exportPurchaseInvoices = async (tenantId, filters = {}) => {
     totalItems: p.items.length
   }));
 };
+
+export const updatePurchaseInvoice = async (tenantId, userId, purchaseId, data) => {
+  const invoice = await prisma.purchaseInvoice.findFirst({
+    where: { id: purchaseId, tenantId },
+    include: { items: { include: { product: true } }, supplier: true }
+  });
+
+  if (!invoice) throw new ApiError(404, 'Purchase Invoice not found.');
+  if (invoice.purchaseStatus === 'CANCELLED') {
+    throw new ApiError(400, 'Cannot edit a CANCELLED purchase invoice.');
+  }
+
+  const {
+    supplierId,
+    supplierInvoiceNumber,
+    invoiceDate,
+    dueDate,
+    paymentTerms,
+    purchaseType,
+    bankAccount,
+    referenceNumber,
+    attachments,
+    notes,
+    items,
+    discountAmount: clientDiscount = 0,
+    cgstAmount = 0,
+    sgstAmount = 0,
+    igstAmount = 0,
+    otherCharges = 0,
+    roundOff = 0,
+    paymentMethod,
+    purchaseStatus,
+    paidAmount
+  } = data;
+
+  const reqStatus = (data.purchaseStatus || data.status || data.action || '').toUpperCase();
+  const isExplicitDraft = reqStatus === 'DRAFT' || data.saveAsDraft === true || data.isDraft === true;
+  const isTargetConfirmed = reqStatus === 'CONFIRMED' || !isExplicitDraft;
+  const enumPaymentMethod = sanitizeEnumMethod(paymentMethod || invoice.paymentMethod);
+
+  return await prisma.$transaction(async (tx) => {
+    if (invoice.purchaseStatus === 'DRAFT') {
+      let updateSupplierId = invoice.supplierId;
+      if (supplierId && supplierId !== invoice.supplierId) {
+        const supp = await tx.supplier.findFirst({ where: { id: supplierId, tenantId } });
+        if (!supp) throw new ApiError(404, 'New supplier not found.');
+        updateSupplierId = supplierId;
+      }
+
+      let subtotal = invoice.subtotal;
+      let grossDiscount = invoice.discountAmount;
+      let grossTax = invoice.taxAmount;
+      let grandTotal = invoice.totalAmount;
+      let dueAmount = invoice.dueAmount;
+      const actualPaid = paidAmount !== undefined ? parseFloat(paidAmount) : invoice.paidAmount;
+
+      let preparedItems = [];
+
+      if (items && Array.isArray(items) && items.length > 0) {
+        subtotal = 0;
+        let totalTaxCalculated = 0;
+        let totalItemDiscountCalculated = 0;
+
+        for (const item of items) {
+          if (!item.productId) throw new ApiError(400, 'Product ID is required for line items.');
+          const product = await tx.product.findFirst({ where: { id: item.productId, tenantId } });
+          if (!product) throw new ApiError(404, `Product not found for ID ${item.productId}`);
+
+          const qty = parseInt(item.quantity) || 1;
+          const price = parseFloat(item.unitPurchasePrice) || 0;
+          const itemDiscPct = parseFloat(item.discountPercent) || 0;
+          let itemDisc = parseFloat(item.discountAmount) || 0;
+          if (itemDiscPct > 0 && !itemDisc) {
+            itemDisc = (qty * price * itemDiscPct) / 100;
+          }
+          const itemTaxPct = parseFloat(item.taxPercent) || 0;
+
+          const pTaxType = (product.taxType || '').toUpperCase();
+          const iTaxType = (item.taxType || '').toUpperCase();
+          const isInclusive = ['INCLUSIVE', 'GST_INCLUSIVE'].includes(pTaxType) || ['INCLUSIVE', 'GST_INCLUSIVE'].includes(iTaxType);
+          const lineRawTotal = qty * price;
+          const rawLineNet = Math.max(0, lineRawTotal - itemDisc);
+
+          let lineTaxable = rawLineNet;
+          let lineTaxAmt = 0;
+          let lineGrandTotal = rawLineNet;
+
+          if (isInclusive && itemTaxPct > 0) {
+            lineTaxable = Math.round((rawLineNet / (1 + (itemTaxPct / 100))) * 100) / 100;
+            lineTaxAmt = Math.round((rawLineNet - lineTaxable) * 100) / 100;
+            lineGrandTotal = rawLineNet;
+          } else {
+            lineTaxable = Math.round(rawLineNet * 100) / 100;
+            lineTaxAmt = Math.round(((lineTaxable * itemTaxPct) / 100) * 100) / 100;
+            lineGrandTotal = Math.round((lineTaxable + lineTaxAmt) * 100) / 100;
+          }
+
+          subtotal += lineTaxable;
+          totalItemDiscountCalculated += itemDisc;
+          totalTaxCalculated += lineTaxAmt;
+
+          preparedItems.push({
+            productId: product.id,
+            product,
+            sku: product.sku,
+            unit: item.unit || 'Nos',
+            quantity: qty,
+            unitPurchasePrice: price,
+            discountPercent: itemDiscPct,
+            discountAmount: itemDisc,
+            taxPercent: itemTaxPct,
+            taxAmount: lineTaxAmt,
+            totalAmount: lineGrandTotal
+          });
+        }
+
+        grossDiscount = (parseFloat(clientDiscount) || 0) + totalItemDiscountCalculated;
+        grossTax = (parseFloat(cgstAmount) || 0) + (parseFloat(sgstAmount) || 0) + (parseFloat(igstAmount) || 0) || totalTaxCalculated;
+        const addCharges = parseFloat(otherCharges) || 0;
+        const rOff = parseFloat(roundOff) || 0;
+
+        const rawGrandTotal = subtotal - grossDiscount + grossTax + addCharges + rOff;
+        grandTotal = Math.max(0, Math.round(rawGrandTotal * 100) / 100);
+        dueAmount = Math.max(0, grandTotal - actualPaid);
+
+        await tx.purchaseItem.deleteMany({ where: { purchaseInvoiceId: purchaseId } });
+        await tx.purchaseItem.createMany({
+          data: preparedItems.map(i => ({
+            purchaseInvoiceId: purchaseId,
+            productId: i.productId,
+            sku: i.sku,
+            unit: i.unit,
+            quantity: i.quantity,
+            unitPurchasePrice: i.unitPurchasePrice,
+            discountPercent: i.discountPercent,
+            discountAmount: i.discountAmount,
+            taxPercent: i.taxPercent,
+            taxAmount: i.taxAmount,
+            totalAmount: i.totalAmount
+          }))
+        });
+      }
+
+      let paymentStatus = 'PAID';
+      if (dueAmount > 0 && actualPaid > 0) paymentStatus = 'PARTIALLY_PAID';
+      else if (dueAmount > 0 && actualPaid === 0) paymentStatus = 'UNPAID';
+
+      const finalStatus = isTargetConfirmed ? 'CONFIRMED' : 'DRAFT';
+
+      // Update Purchase Invoice Details
+      const updatedInvoice = await tx.purchaseInvoice.update({
+        where: { id: purchaseId },
+        data: {
+          supplierId: updateSupplierId,
+          supplierInvoiceNumber: supplierInvoiceNumber !== undefined ? supplierInvoiceNumber : invoice.supplierInvoiceNumber,
+          invoiceDate: invoiceDate ? new Date(invoiceDate) : invoice.invoiceDate,
+          dueDate: dueDate ? new Date(dueDate) : invoice.dueDate,
+          paymentTerms: paymentTerms !== undefined ? paymentTerms : invoice.paymentTerms,
+          purchaseType: purchaseType || invoice.purchaseType,
+          bankAccount: bankAccount !== undefined ? bankAccount : invoice.bankAccount,
+          referenceNumber: referenceNumber !== undefined ? referenceNumber : invoice.referenceNumber,
+          attachments: attachments !== undefined ? attachments : invoice.attachments,
+          notes: notes !== undefined ? notes : invoice.notes,
+          paymentMethod: enumPaymentMethod,
+          subtotal,
+          taxAmount: grossTax,
+          discountAmount: grossDiscount,
+          cgstAmount: cgstAmount !== undefined ? parseFloat(cgstAmount) : invoice.cgstAmount,
+          sgstAmount: sgstAmount !== undefined ? parseFloat(sgstAmount) : invoice.sgstAmount,
+          igstAmount: igstAmount !== undefined ? parseFloat(igstAmount) : invoice.igstAmount,
+          otherCharges: otherCharges !== undefined ? parseFloat(otherCharges) : invoice.otherCharges,
+          roundOff: roundOff !== undefined ? parseFloat(roundOff) : invoice.roundOff,
+          totalAmount: grandTotal,
+          paidAmount: actualPaid,
+          dueAmount,
+          paymentStatus,
+          purchaseStatus: finalStatus
+        },
+        include: {
+          supplier: true,
+          items: { include: { product: true } }
+        }
+      });
+
+      // If transitioning from DRAFT -> CONFIRMED, update Stock, StockHistory & Supplier Dues
+      if (isTargetConfirmed) {
+        const itemsToProcess = preparedItems.length > 0 ? preparedItems : invoice.items;
+        for (const item of itemsToProcess) {
+          const productObj = item.product || await tx.product.findUnique({ where: { id: item.productId } });
+          if (productObj) {
+            const prevStock = productObj.currentStock;
+            const newStock = prevStock + item.quantity;
+
+            await tx.product.update({
+              where: { id: item.productId },
+              data: {
+                currentStock: newStock,
+                purchasePrice: item.unitPurchasePrice || item.purchasePrice || productObj.purchasePrice
+              }
+            });
+
+            await tx.stockHistory.create({
+              data: {
+                tenantId,
+                productId: item.productId,
+                previousStock: prevStock,
+                addedRemovedQty: item.quantity,
+                updatedStock: newStock,
+                reason: 'NEW_PURCHASE',
+                updatedByUserId: userId
+              }
+            });
+          }
+        }
+
+        await tx.supplier.update({
+          where: { id: updateSupplierId },
+          data: {
+            totalPurchases: { increment: grandTotal },
+            totalPaid: { increment: actualPaid },
+            outstandingDue: { increment: dueAmount }
+          }
+        });
+      }
+
+      return updatedInvoice;
+    } else {
+      return await tx.purchaseInvoice.update({
+        where: { id: purchaseId },
+        data: {
+          supplierInvoiceNumber: supplierInvoiceNumber !== undefined ? supplierInvoiceNumber : invoice.supplierInvoiceNumber,
+          invoiceDate: invoiceDate ? new Date(invoiceDate) : invoice.invoiceDate,
+          dueDate: dueDate ? new Date(dueDate) : invoice.dueDate,
+          paymentTerms: paymentTerms !== undefined ? paymentTerms : invoice.paymentTerms,
+          purchaseType: purchaseType || invoice.purchaseType,
+          bankAccount: bankAccount !== undefined ? bankAccount : invoice.bankAccount,
+          referenceNumber: referenceNumber !== undefined ? referenceNumber : invoice.referenceNumber,
+          attachments: attachments !== undefined ? attachments : invoice.attachments,
+          notes: notes !== undefined ? notes : invoice.notes
+        },
+        include: {
+          supplier: true,
+          items: { include: { product: true } }
+        }
+      });
+    }
+  });
+};
+
+export const deletePurchaseInvoice = async (tenantId, userId, purchaseId) => {
+  const invoice = await prisma.purchaseInvoice.findFirst({
+    where: { id: purchaseId, tenantId },
+    include: { items: { include: { product: true } }, supplier: true }
+  });
+
+  if (!invoice) throw new ApiError(404, 'Purchase Invoice not found.');
+
+  return await prisma.$transaction(async (tx) => {
+    if (['CONFIRMED', 'PARTIALLY_RETURNED'].includes(invoice.purchaseStatus)) {
+      for (const item of invoice.items) {
+        const prevStock = item.product.currentStock;
+        const newStock = Math.max(0, prevStock - item.quantity);
+
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { currentStock: newStock }
+        });
+
+        await tx.stockHistory.create({
+          data: {
+            tenantId,
+            productId: item.productId,
+            previousStock: prevStock,
+            addedRemovedQty: -item.quantity,
+            updatedStock: newStock,
+            reason: 'CANCELLED_BILL',
+            updatedByUserId: userId
+          }
+        });
+      }
+
+      const newOutstandingDue = Math.max(0, invoice.supplier.outstandingDue - invoice.dueAmount);
+      const newTotalPurchases = Math.max(0, invoice.supplier.totalPurchases - invoice.totalAmount);
+      const newTotalPaid = Math.max(0, invoice.supplier.totalPaid - invoice.paidAmount);
+
+      await tx.supplier.update({
+        where: { id: invoice.supplierId },
+        data: {
+          totalPurchases: newTotalPurchases,
+          totalPaid: newTotalPaid,
+          outstandingDue: newOutstandingDue
+        }
+      });
+    }
+
+    await tx.purchaseReturnItem.deleteMany({
+      where: { purchaseReturn: { purchaseInvoiceId: purchaseId } }
+    });
+    await tx.purchaseReturn.deleteMany({
+      where: { purchaseInvoiceId: purchaseId }
+    });
+    await tx.purchaseItem.deleteMany({
+      where: { purchaseInvoiceId: purchaseId }
+    });
+
+    await tx.purchaseInvoice.delete({
+      where: { id: purchaseId }
+    });
+
+    return { id: purchaseId, purchaseNumber: invoice.purchaseNumber };
+  });
+};
+
+export const getPurchaseReturnDetails = async (tenantId, returnId) => {
+  const pReturn = await prisma.purchaseReturn.findFirst({
+    where: { id: returnId, tenantId },
+    include: {
+      supplier: { select: { id: true, name: true, companyName: true, mobileNumber: true, email: true, gstin: true } },
+      purchaseInvoice: { select: { id: true, purchaseNumber: true, supplierInvoiceNumber: true, invoiceDate: true } },
+      createdBy: { select: { id: true, name: true, email: true } },
+      items: { include: { product: { select: { id: true, name: true, sku: true, categoryId: true } } } }
+    }
+  });
+
+  if (!pReturn) throw new ApiError(404, 'Purchase Return record not found.');
+  return pReturn;
+};
+
+export const exportPurchaseReturns = async (tenantId, filters = {}) => {
+  const { search, startDate, endDate } = filters;
+  const where = { tenantId };
+
+  if (startDate || endDate) {
+    where.returnDate = {};
+    if (startDate) where.returnDate.gte = new Date(startDate);
+    if (endDate) where.returnDate.lte = new Date(endDate);
+  }
+
+  if (search && search.trim()) {
+    const q = search.trim();
+    where.OR = [
+      { returnNumber: { contains: q, mode: 'insensitive' } },
+      { supplier: { name: { contains: q, mode: 'insensitive' } } },
+      { purchaseInvoice: { purchaseNumber: { contains: q, mode: 'insensitive' } } }
+    ];
+  }
+
+  const returns = await prisma.purchaseReturn.findMany({
+    where,
+    include: {
+      supplier: { select: { name: true, companyName: true } },
+      purchaseInvoice: { select: { purchaseNumber: true } },
+      createdBy: { select: { name: true } },
+      items: true
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  return returns.map(r => ({
+    returnNumber: r.returnNumber,
+    purchaseNumber: r.purchaseInvoice?.purchaseNumber || 'N/A',
+    supplierName: r.supplier?.name || 'N/A',
+    companyName: r.supplier?.companyName || 'N/A',
+    returnDate: r.returnDate ? r.returnDate.toISOString().split('T')[0] : '',
+    returnReason: r.returnReason || 'N/A',
+    refundType: r.refundType || 'CASH_REFUND',
+    totalReturnAmount: r.totalReturnAmount,
+    refundAmount: r.refundAmount,
+    createdBy: r.createdBy?.name || 'Admin',
+    totalItemsReturned: r.items.reduce((acc, curr) => acc + curr.returnQty, 0)
+  }));
+};
+
+export const deletePurchasePayment = async (tenantId, userId, paymentId) => {
+  const payment = await prisma.supplierPayment.findFirst({
+    where: { id: paymentId, tenantId },
+    include: { supplier: true }
+  });
+
+  if (!payment) throw new ApiError(404, 'Supplier payment record not found.');
+
+  return await prisma.$transaction(async (tx) => {
+    await tx.supplierPayment.delete({
+      where: { id: paymentId }
+    });
+
+    const newTotalPaid = Math.max(0, payment.supplier.totalPaid - payment.amount);
+    const newOutstandingDue = payment.supplier.outstandingDue + payment.amount;
+
+    await tx.supplier.update({
+      where: { id: payment.supplierId },
+      data: {
+        totalPaid: newTotalPaid,
+        outstandingDue: newOutstandingDue
+      }
+    });
+
+    return { id: paymentId, amount: payment.amount, supplierId: payment.supplierId };
+  });
+};
+

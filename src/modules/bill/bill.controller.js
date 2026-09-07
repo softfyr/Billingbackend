@@ -4,29 +4,29 @@ import { asyncHandler } from '../../utils/asyncHandler.js';
 
 export const handleGenerateBill = asyncHandler(async (req, res) => {
   const bill = await billService.generateBill(req.tenantId, req.user.id, req.body);
-  return res.status(201).json(new ApiResponse(201, bill, 'Customer invoice generated successfully.'));
+  return ApiResponse.created(res, bill, 'Customer invoice generated successfully.');
 });
 
 export const handleCancelBill = asyncHandler(async (req, res) => {
   const cancelled = await billService.cancelBill(req.tenantId, req.user.id, req.params.id);
-  return res.status(200).json(new ApiResponse(200, cancelled, 'Bill cancelled and stock restored successfully.'));
+  return ApiResponse.success(res, cancelled, 'Bill cancelled and stock restored successfully.');
 });
 
 export const handleProcessProductReturn = asyncHandler(async (req, res) => {
   const { returnItems } = req.body;
   const result = await billService.processProductReturn(req.tenantId, req.user.id, req.params.id, returnItems);
-  return res.status(200).json(new ApiResponse(200, result, 'Product return processed and stock adjusted successfully.'));
+  return ApiResponse.success(res, result, 'Product return processed and stock adjusted successfully.');
 });
 
 export const handleGetBills = asyncHandler(async (req, res) => {
   const { status, customerId, startDate, endDate, search } = req.query;
   const bills = await billService.getBills(req.tenantId, { status, customerId, startDate, endDate, search });
-  return res.status(200).json(new ApiResponse(200, bills, 'Bills list fetched successfully.'));
+  return ApiResponse.success(res, bills, 'Bills list fetched successfully.');
 });
 
 export const handleGetBillDetails = asyncHandler(async (req, res) => {
   const bill = await billService.getBillDetails(req.tenantId, req.params.id);
-  return res.status(200).json(new ApiResponse(200, bill, 'Bill details fetched successfully.'));
+  return ApiResponse.success(res, bill, 'Bill details fetched successfully.');
 });
 
 import { exportToExcel, exportToCSV } from '../../utils/export.utility.js';
@@ -58,6 +58,6 @@ export const handleExportBills = asyncHandler(async (req, res) => {
     return exportToCSV(res, { filename: 'sales_invoices', columns, data: exportData });
   }
 
-  return res.status(200).json(new ApiResponse(200, exportData, 'Sales bills export dataset generated successfully.'));
+  return ApiResponse.success(res, exportData, 'Sales bills export dataset generated successfully.');
 });
 

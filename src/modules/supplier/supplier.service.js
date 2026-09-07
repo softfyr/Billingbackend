@@ -349,7 +349,7 @@ export const recordSupplierPayment = async (tenantId, userId, supplierId, data) 
   const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, tenantId } });
   if (!supplier) throw new ApiError(404, 'Supplier not found.');
 
-  const validPmtMethod = ['CASH', 'UPI', 'CARD', 'OTHER'].includes((paymentMethod || '').toUpperCase())
+  const validPmtMethod = ['CASH', 'UPI', 'CARD'].includes((paymentMethod || '').toUpperCase())
     ? paymentMethod.toUpperCase()
     : 'OTHER';
 
@@ -402,7 +402,7 @@ export const updateSupplier = async (tenantId, supplierId, data) => {
   if (data.supplierType !== undefined) updateData.supplierType = data.supplierType;
   if (data.creditLimit !== undefined) updateData.creditLimit = parseFloat(data.creditLimit) || 0;
   if (data.paymentTerms !== undefined) updateData.paymentTerms = data.paymentTerms;
-  if (data.status) updateData.status = data.status === 'INACTIVE' ? 'SUSPENDED' : 'ACTIVE';
+  if (data.status) { const statusUpper = data.status.toString().toUpperCase(); updateData.status = (statusUpper === 'INACTIVE' || statusUpper === 'SUSPENDED') ? 'SUSPENDED' : 'ACTIVE'; }
 
   return await prisma.supplier.update({
     where: { id: supplierId },
@@ -414,7 +414,34 @@ export const deleteSupplier = async (tenantId, supplierId) => {
   const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, tenantId } });
   if (!supplier) throw new ApiError(404, 'Supplier not found.');
 
-  return await prisma.supplier.delete({ where: { id: supplierId } });
+  const linkedInvoices = await prisma.purchaseInvoice.count({ where: { supplierId, tenantId } });
+  const linkedPayments = await prisma.supplierPayment.count({ where: { supplierId, tenantId } });
+  const linkedReturns = prisma.purchaseReturn ? await prisma.purchaseReturn.count({ where: { supplierId, tenantId } }) : 0;
+
+  const totalLinkedRecords = linkedInvoices + linkedPayments + linkedReturns;
+
+  if (totalLinkedRecords > 0) {
+    await prisma.supplier.updateMany({
+      where: { id: supplierId, tenantId },
+      data: { status: 'SUSPENDED' }
+    });
+
+    return {
+      message: `Supplier "${supplier.name}" account suspended because ${totalLinkedRecords} linked financial records exist.`,
+      isSoftDeleted: true,
+      supplierId
+    };
+  }
+
+  await prisma.supplier.deleteMany({
+    where: { id: supplierId, tenantId }
+  });
+
+  return {
+    message: `Supplier "${supplier.name}" permanently deleted.`,
+    isSoftDeleted: false,
+    supplierId
+  };
 };
 
 export const importSuppliers = async (tenantId, suppliersArray = []) => {

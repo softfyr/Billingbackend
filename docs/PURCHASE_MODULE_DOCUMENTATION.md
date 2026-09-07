@@ -152,13 +152,19 @@ Mounted under `/api/v1/purchases` requiring JWT Bearer Authentication (`authenti
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/v1/purchases` | `TENANT_ADMIN` | Create Purchase Bill (`DRAFT` or `CONFIRMED`) |
 | `GET` | `/api/v1/purchases` | All Staff | List Purchase Bills with Top Banner KPIs & Status Counts |
-| `GET` | `/api/v1/purchases/export` | All Staff | Export Purchase Invoices Dataset |
+| `GET` | `/api/v1/purchases/export` | All Staff | Export Purchase Invoices Dataset (Excel / CSV) |
 | `POST` | `/api/v1/purchases/returns` | `TENANT_ADMIN` | Create Structured Purchase Return / Cancellation |
 | `GET` | `/api/v1/purchases/returns` | All Staff | List Purchase Returns |
+| `GET` | `/api/v1/purchases/returns/export` | All Staff | Export Purchase Returns Dataset (Excel / CSV) |
+| `GET` | `/api/v1/purchases/returns/:id` | All Staff | Get Details of a Single Purchase Return Receipt |
+| `DELETE` | `/api/v1/purchases/payments/:paymentId` | `TENANT_ADMIN` | Reverse/Delete Supplier Payment Entry & Restore Dues |
 | `GET` | `/api/v1/purchases/:id` | All Staff | Get Bill Details, Payment Summary & Supplier Info |
+| `PUT` | `/api/v1/purchases/:id` | `TENANT_ADMIN` | Update Purchase Bill (Full edit for DRAFT, metadata for CONFIRMED) |
+| `DELETE` | `/api/v1/purchases/:id` | `TENANT_ADMIN` | Delete Purchase Bill & Adjust Inventory Stock / Supplier Dues |
 | `POST` | `/api/v1/purchases/:id/confirm` | `TENANT_ADMIN` | Confirm DRAFT Bill & Update Inventory |
 | `POST` | `/api/v1/purchases/:id/payments` | `TENANT_ADMIN` | Record Payment against Purchase Bill |
 | `POST` | `/api/v1/purchases/:id/cancel` | `TENANT_ADMIN` | Cancel Purchase Bill & Reverse Inventory Stock |
+
 
 ---
 

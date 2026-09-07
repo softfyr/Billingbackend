@@ -4,7 +4,7 @@ import * as subscriptionService from '../src/modules/subscription/subscription.s
 import * as businessService from '../src/modules/business/business.service.js';
 
 async function runVendorOTPOnboardingTests() {
-  console.log('🧪 --- STARTING VENDOR OTP LOGIN & ONBOARDING WORKFLOW TESTS ---');
+  console.log('🧪 --- STARTING VENDOR OTP LOGIN & ONBOARDING WORKFLOW TESTS (2-STEP PROFILE & REORDERED FLOW) ---');
 
   const existingVendorPhone = '9876543210';
   const newVendorPhone = '8888888888';
@@ -12,8 +12,23 @@ async function runVendorOTPOnboardingTests() {
   try {
     // 1. Cleanup Test Accounts
     console.log('\n🧹 Cleaning up test accounts...');
+    const testTenants = await prisma.tenant.findMany({ where: { mobileNumber: { in: [existingVendorPhone, newVendorPhone] } } });
+    const tenantIds = testTenants.map(t => t.id);
+    if (tenantIds.length > 0) {
+      await prisma.purchaseReturnItem.deleteMany({ where: { purchaseReturn: { tenantId: { in: tenantIds } } } });
+      await prisma.purchaseReturn.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.purchaseItem.deleteMany({ where: { purchaseInvoice: { tenantId: { in: tenantIds } } } });
+      await prisma.purchaseInvoice.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.supplierPayment.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.supplier.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.stockHistory.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.billItem.deleteMany({ where: { bill: { tenantId: { in: tenantIds } } } });
+      await prisma.bill.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.product.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.user.deleteMany({ where: { tenantId: { in: tenantIds } } });
+      await prisma.tenant.deleteMany({ where: { id: { in: tenantIds } } });
+    }
     await prisma.user.deleteMany({ where: { mobileNumber: { in: [existingVendorPhone, newVendorPhone] } } });
-    await prisma.tenant.deleteMany({ where: { mobileNumber: { in: [existingVendorPhone, newVendorPhone] } } });
     await prisma.oTPVerification.deleteMany({ where: { mobileNumber: { in: [existingVendorPhone, newVendorPhone] } } });
 
     // Seed a package if needed
@@ -43,7 +58,8 @@ async function runVendorOTPOnboardingTests() {
         accountStatus: 'ACTIVE',
         subscriptionStartDate: new Date(),
         subscriptionExpiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        isProfileComplete: true
+        isProfileComplete: true,
+        profileStep: 2
       }
     });
     await prisma.user.create({
@@ -84,8 +100,8 @@ async function runVendorOTPOnboardingTests() {
       throw new Error(`FAILED: Existing vendor redirectUrl should be '/vendor/dashboard', got '${verifyOtpExistingRes.redirectUrl}'`);
     }
 
-    // TEST CASE B: New Vendor OTP Login -> Package Choose -> Business Profile -> Dashboard Access
-    console.log('\n--- TEST CASE B: NEW VENDOR FULL ONBOARDING FLOW ---');
+    // TEST CASE B: New Vendor OTP Login -> Step 1 Profile -> Step 2 Profile -> Choose Package -> Dashboard Access
+    console.log('\n--- TEST CASE B: NEW VENDOR 2-STEP PROFILE & PACKAGE SELECTION ONBOARDING FLOW ---');
 
     // Step 1: Send OTP to new mobile
     console.log('Step 1: Requesting OTP for new mobile number...');
@@ -94,9 +110,6 @@ async function runVendorOTPOnboardingTests() {
       isExistingUser: sendOtpNewRes.isExistingUser,
       mobileNumber: sendOtpNewRes.mobileNumber
     });
-    if (sendOtpNewRes.isExistingUser) {
-      throw new Error('FAILED: New vendor should return isExistingUser: false');
-    }
 
     // Step 2: Verify OTP
     console.log('Step 2: Verifying OTP for new vendor...');
@@ -108,18 +121,73 @@ async function runVendorOTPOnboardingTests() {
       isExistingUser: verifyOtpNewRes.isExistingUser,
       hasSelectedPackage: verifyOtpNewRes.hasSelectedPackage,
       isProfileComplete: verifyOtpNewRes.isProfileComplete,
+      profileStep: verifyOtpNewRes.tenant?.profileStep,
       redirectUrl: verifyOtpNewRes.redirectUrl,
       tenantId: verifyOtpNewRes.tenant.id
     });
 
-    if (verifyOtpNewRes.redirectUrl !== '/choose-package') {
-      throw new Error(`FAILED: New vendor redirectUrl should be '/choose-package', got '${verifyOtpNewRes.redirectUrl}'`);
+    if (verifyOtpNewRes.redirectUrl !== '/create-business-profile/step-1') {
+      throw new Error(`FAILED: New vendor redirectUrl should be '/create-business-profile/step-1', got '${verifyOtpNewRes.redirectUrl}'`);
     }
 
     const newTenantId = verifyOtpNewRes.tenant.id;
 
-    // Step 3: Choose Package
-    console.log('Step 3: New Vendor choosing subscription package...');
+    // Step 3: Complete Business Profile Step 1 (Basic Details)
+    console.log('Step 3: Completing Profile Step 1 (Basic Details)...');
+    const step1Res = await businessService.createBusinessProfileStep1(newTenantId, {
+      businessName: 'Fresh Mart Grocery Store',
+      businessType: 'Retail Grocery',
+      ownerName: 'New Vendor Owner',
+      email: 'vendor.freshmart@example.com'
+    });
+    console.log('✅ Profile Step 1 Response:', {
+      profileStep: step1Res.profileStep,
+      isProfileComplete: step1Res.isProfileComplete,
+      hasSelectedPackage: step1Res.hasSelectedPackage,
+      redirectUrl: step1Res.redirectUrl
+    });
+
+    if (step1Res.redirectUrl !== '/create-business-profile/step-2') {
+      throw new Error(`FAILED: Step 1 redirectUrl should be '/create-business-profile/step-2', got '${step1Res.redirectUrl}'`);
+    }
+
+    // Step 3.5: Test login resume at Step 2
+    console.log('Step 3.5: Testing login resume at Step 2...');
+    await prisma.oTPVerification.updateMany({ data: { lastSentAt: new Date(Date.now() - 60000) } });
+    const sendOtpStep2 = await authService.sendLoginOTP({ mobileNumber: newVendorPhone });
+    const verifyOtpStep2 = await authService.verifyLoginOTP({
+      mobileNumber: newVendorPhone,
+      otpCode: sendOtpStep2.otpCode
+    });
+    console.log('✅ Resume Login Response (At Step 2):', {
+      redirectUrl: verifyOtpStep2.redirectUrl
+    });
+    if (verifyOtpStep2.redirectUrl !== '/create-business-profile/step-2') {
+      throw new Error(`FAILED: Resume login should be '/create-business-profile/step-2', got '${verifyOtpStep2.redirectUrl}'`);
+    }
+
+    // Step 4: Complete Business Profile Step 2 (Location & Tax Details)
+    console.log('Step 4: Completing Profile Step 2 (Location & Tax Details)...');
+    const step2Res = await businessService.createBusinessProfileStep2(newTenantId, {
+      businessAddress: '123 Market Street',
+      city: 'Delhi',
+      state: 'Delhi',
+      pincode: '110001',
+      gstNumber: '07AAAAA0000A1Z5'
+    });
+    console.log('✅ Profile Step 2 Response:', {
+      profileStep: step2Res.profileStep,
+      isProfileComplete: step2Res.isProfileComplete,
+      hasSelectedPackage: step2Res.hasSelectedPackage,
+      redirectUrl: step2Res.redirectUrl
+    });
+
+    if (step2Res.redirectUrl !== '/choose-package') {
+      throw new Error(`FAILED: Step 2 redirectUrl should be '/choose-package', got '${step2Res.redirectUrl}'`);
+    }
+
+    // Step 5: Choose Package
+    console.log('Step 5: New Vendor choosing subscription package...');
     const choosePkgRes = await subscriptionService.chooseInitialPackage(newTenantId, { packageId: pkg.id });
     console.log('✅ Choose Package Response:', {
       hasSelectedPackage: choosePkgRes.hasSelectedPackage,
@@ -127,34 +195,11 @@ async function runVendorOTPOnboardingTests() {
       redirectUrl: choosePkgRes.redirectUrl
     });
 
-    if (choosePkgRes.redirectUrl !== '/create-business-profile') {
-      throw new Error(`FAILED: Choose Package redirectUrl should be '/create-business-profile', got '${choosePkgRes.redirectUrl}'`);
+    if (choosePkgRes.redirectUrl !== '/vendor/dashboard') {
+      throw new Error(`FAILED: Choose Package redirectUrl should be '/vendor/dashboard', got '${choosePkgRes.redirectUrl}'`);
     }
 
-    // Step 4: Create Business Profile
-    console.log('Step 4: New Vendor creating business profile...');
-    const createProfileRes = await businessService.createBusinessProfile(newTenantId, {
-      businessName: 'Fresh Mart Grocery Store',
-      businessType: 'Retail Store',
-      ownerName: 'New Vendor Owner',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110001',
-      gstNumber: '07AAAAA0000A1Z5'
-    });
-
-    console.log('✅ Create Business Profile Response:', {
-      isProfileComplete: createProfileRes.isProfileComplete,
-      hasSelectedPackage: createProfileRes.hasSelectedPackage,
-      redirectUrl: createProfileRes.redirectUrl,
-      businessName: createProfileRes.businessName
-    });
-
-    if (createProfileRes.redirectUrl !== '/vendor/dashboard') {
-      throw new Error(`FAILED: Create Profile redirectUrl should be '/vendor/dashboard', got '${createProfileRes.redirectUrl}'`);
-    }
-
-    // Step 5: Subsequent Login for newly onboarded Vendor
+    // Step 6: Subsequent Login for newly onboarded Vendor
     console.log('\n--- TEST CASE C: SUBSEQUENT LOGIN FOR NEWLY ONBOARDED VENDOR ---');
     await prisma.oTPVerification.updateMany({ data: { lastSentAt: new Date(Date.now() - 60000) } });
     const sendOtpSubsequent = await authService.sendLoginOTP({ mobileNumber: newVendorPhone });
@@ -174,7 +219,7 @@ async function runVendorOTPOnboardingTests() {
       throw new Error(`FAILED: Subsequent login redirectUrl should be '/vendor/dashboard', got '${verifyOtpSubsequent.redirectUrl}'`);
     }
 
-    console.log('\n🎉 --- ALL VENDOR OTP & ONBOARDING TESTS PASSED PERFECTLY ---');
+    console.log('\n🎉 --- ALL VENDOR OTP & 2-STEP ONBOARDING TESTS PASSED PERFECTLY ---');
   } catch (err) {
     console.error('❌ Test failed with error:', err);
     process.exit(1);

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../utils/apiError.js';
+import { cleanPhoneNumber } from '../../utils/phone.util.js';
 import { generateAndSendOTP, verifyOTP } from '../../utils/otpService.js';
 import {
   generateAuthTokens,
@@ -8,17 +9,12 @@ import {
   checkSubscriptionExpiry,
   formatUserResponse
 } from '../../utils/auth.util.js';
-import { createEmployee } from '../employee/employee.service.js';
 
 export const resendOTP = async (data) => {
   const mobileNumber = typeof data === 'string' ? data : (data?.mobileNumber || data?.phone || data?.phoneNumber);
 
-  if (!mobileNumber) {
-    throw new ApiError(400, 'Phone number is required to resend OTP.');
-  }
-
-  const cleanMobile = mobileNumber.toString().trim().replace(/\D/g, '').slice(-10);
-  if (cleanMobile.length !== 10) {
+  const cleanMobile = cleanPhoneNumber(mobileNumber);
+  if (!cleanMobile) {
     throw new ApiError(400, 'Phone number must be a valid 10-digit number.');
   }
 
@@ -28,7 +24,7 @@ export const resendOTP = async (data) => {
     success: true,
     message: 'New OTP generated and sent via SMS.',
     mobileNumber: cleanMobile,
-    otpCode: otpResult.otpCode,
+    ...(process.env.NODE_ENV === 'development' && { otpCode: otpResult.otpCode }),
     expiresAt: otpResult.expiresAt,
     cooldownSeconds: otpResult.cooldownSeconds
   };
@@ -37,12 +33,8 @@ export const resendOTP = async (data) => {
 export const sendLoginOTP = async (data) => {
   const mobileNumber = typeof data === 'string' ? data : (data?.mobileNumber || data?.phone || data?.phoneNumber);
 
-  if (!mobileNumber) {
-    throw new ApiError(400, 'Phone number is required.');
-  }
-
-  const cleanMobile = mobileNumber.toString().trim().replace(/\D/g, '').slice(-10);
-  if (cleanMobile.length !== 10) {
+  const cleanMobile = cleanPhoneNumber(mobileNumber);
+  if (!cleanMobile) {
     throw new ApiError(400, 'Phone number must be a valid 10-digit number.');
   }
 
@@ -71,7 +63,7 @@ export const sendLoginOTP = async (data) => {
     isExistingUser,
     role: roleName,
     tenantId: user?.tenantId || null,
-    otpCode: otpRes.otpCode,
+    ...(process.env.NODE_ENV === 'development' && { otpCode: otpRes.otpCode }),
     expiresAt: otpRes.expiresAt,
     cooldownSeconds: otpRes.cooldownSeconds
   };
@@ -86,7 +78,10 @@ export const verifyLoginOTP = async (data) => {
     throw new ApiError(400, 'Phone number and 6-digit OTP code are required.');
   }
 
-  const cleanMobile = rawMobile.toString().trim().replace(/\D/g, '').slice(-10);
+  const cleanMobile = cleanPhoneNumber(rawMobile);
+  if (!cleanMobile) {
+    throw new ApiError(400, 'Phone number must be a valid 10-digit number.');
+  }
 
   // Verify OTP code (handles 5-min expiry, max 5 attempts lockout)
   const verifyRes = await verifyOTP(cleanMobile, otpCode);
@@ -106,7 +101,7 @@ export const verifyLoginOTP = async (data) => {
   if (!user) {
     const ownerName = (verifyRes.metadata && (verifyRes.metadata.name || verifyRes.metadata.ownerName)) || 'Vendor Owner';
     const email = (verifyRes.metadata && verifyRes.metadata.email) || null;
-    const businessName = `${ownerName}'s Store`;
+    const businessName = (verifyRes.metadata && verifyRes.metadata.businessName) || null;
     const defaultPasswordHash = await bcrypt.hash(`OTP_VERIFIED_${cleanMobile}_${Date.now()}`, 10);
 
     const expiryDate = new Date();
@@ -153,14 +148,15 @@ export const verifyLoginOTP = async (data) => {
 
     return formatUserResponse(result.user, result.tenant, {
       success: true,
-      message: 'Mobile OTP verified. Vendor registered. Please select a package to proceed.',
+      message: 'Mobile OTP verified. Vendor registered. Please create your business store profile to proceed.',
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       role: 'vendor',
       isExistingUser: false,
       hasSelectedPackage: false,
       isProfileComplete: false,
-      redirectUrl: '/choose-package'
+      profileStep: 1,
+      redirectUrl: '/create-business-profile/step-1'
     });
   }
 
@@ -176,11 +172,12 @@ export const verifyLoginOTP = async (data) => {
     roleName = 'vendor';
     hasSelectedPackage = !!user.tenant?.currentPackageId;
     isProfileComplete = user.tenant?.isProfileComplete || false;
+    const profileStep = user.tenant?.profileStep || 1;
 
-    if (!hasSelectedPackage) {
+    if (!isProfileComplete) {
+      redirectUrl = profileStep === 2 ? '/create-business-profile/step-2' : '/create-business-profile/step-1';
+    } else if (!hasSelectedPackage) {
       redirectUrl = '/choose-package';
-    } else if (!isProfileComplete) {
-      redirectUrl = '/create-business-profile';
     } else {
       redirectUrl = '/vendor/dashboard';
     }
@@ -264,28 +261,13 @@ export const adminLogin = async (data) => {
 
   const cleanEmail = email.trim().toLowerCase();
 
-  // Find Super Admin user
-  let adminUser = await prisma.user.findFirst({
+  // Find Super Admin user in Database
+  const adminUser = await prisma.user.findFirst({
     where: {
       email: cleanEmail,
       role: 'SUPER_ADMIN'
     }
   });
-
-  // Seed / fallback for super admin if none exists
-  if (!adminUser && cleanEmail === 'admin@softfyr.com') {
-    const hashedPwd = await bcrypt.hash('admin123', 10);
-    adminUser = await prisma.user.create({
-      data: {
-        name: 'SaaS Platform Admin',
-        email: 'admin@softfyr.com',
-        mobileNumber: '9000000000',
-        passwordHash: hashedPwd,
-        role: 'SUPER_ADMIN',
-        status: 'ACTIVE'
-      }
-    });
-  }
 
   if (!adminUser) {
     throw new ApiError(401, 'Invalid email address or password.');
@@ -387,75 +369,5 @@ export const refreshAccessToken = async (data = {}) => {
   };
 };
 
-export const registerEmployee = async (tenantId, data) => {
-  return await createEmployee(tenantId, data);
-};
+export { getVendorProfile } from '../business/business.service.js';
 
-export const getVendorProfile = async (userId) => {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      mobileNumber: true,
-      role: true,
-      status: true,
-      createdAt: true,
-      tenant: {
-        include: {
-          currentPackage: true,
-          _count: {
-            select: {
-              products: { where: { status: 'ACTIVE' } },
-              customers: true,
-              employees: true,
-              bills: true
-            }
-          }
-        }
-      }
-    }
-  });
-
-  if (!user) throw new ApiError(404, 'User profile not found.');
-
-  return {
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      mobileNumber: user.mobileNumber,
-      role: user.role,
-      status: user.status,
-      createdAt: user.createdAt
-    },
-    business: user.tenant ? {
-      id: user.tenant.id,
-      businessName: user.tenant.businessName,
-      ownerName: user.tenant.ownerName,
-      email: user.tenant.email,
-      mobileNumber: user.tenant.mobileNumber,
-      businessLogo: user.tenant.businessLogo,
-      businessAddress: user.tenant.businessAddress,
-      city: user.tenant.city,
-      state: user.tenant.state,
-      country: user.tenant.country,
-      pincode: user.tenant.pincode,
-      gstNumber: user.tenant.gstNumber,
-      panNumber: user.tenant.panNumber,
-      otherInvoiceInfo: user.tenant.otherInvoiceInfo,
-      subscriptionStatus: user.tenant.subscriptionStatus,
-      accountStatus: user.tenant.accountStatus,
-      subscriptionStartDate: user.tenant.subscriptionStartDate,
-      subscriptionExpiryDate: user.tenant.subscriptionExpiryDate,
-      currentPackage: user.tenant.currentPackage,
-      summary: {
-        totalProducts: user.tenant._count.products,
-        totalCustomers: user.tenant._count.customers,
-        totalEmployees: user.tenant._count.employees,
-        totalBills: user.tenant._count.bills
-      }
-    } : null
-  };
-};

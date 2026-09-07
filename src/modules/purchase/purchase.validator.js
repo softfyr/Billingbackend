@@ -15,7 +15,9 @@ export const createPurchaseInvoiceSchema = z.object({
     purchaseStatus: z.enum(['DRAFT', 'CONFIRMED']).optional().default('CONFIRMED'),
     items: z.array(
       z.object({
-        productId: z.string({ required_error: 'Product ID is required for each line item.' }).trim().min(1, 'Product ID cannot be empty.'),
+        productId: z.string().trim().optional().nullable(),
+        newProductData: z.record(z.any()).optional().nullable(),
+        productData: z.record(z.any()).optional().nullable(),
         unit: z.string().optional().default('Nos'),
         quantity: z.number({ required_error: 'Quantity is required.' })
           .positive('Quantity must be greater than zero.')

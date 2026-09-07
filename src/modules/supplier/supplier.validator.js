@@ -1,8 +1,24 @@
 import { z } from 'zod';
 
 const mobileRegex = /^[6-9]\d{9}$/;
-const gstinRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+const gstinRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}[0-9A-Z]{1}[0-9A-Z]{1}$/;
 const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+
+const preprocessGstin = z.preprocess((val) => {
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    return trimmed ? trimmed.toUpperCase() : '';
+  }
+  return val;
+}, z.string().regex(gstinRegex, 'Invalid GSTIN format. GSTIN is typically 15 alphanumeric characters (e.g. 08AAAAA0000A1Z5).').optional().or(z.literal('')).nullable());
+
+const preprocessPan = z.preprocess((val) => {
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    return trimmed ? trimmed.toUpperCase() : '';
+  }
+  return val;
+}, z.string().regex(panRegex, 'Invalid PAN format. PAN is typically 10 alphanumeric characters (e.g. AAAAA0000A).').optional().or(z.literal('')).nullable());
 
 export const createSupplierSchema = z.object({
   body: z.object({
@@ -14,8 +30,8 @@ export const createSupplierSchema = z.object({
       .trim()
       .regex(mobileRegex, 'Invalid 10-digit mobile number format. Must start with 6-9.'),
     email: z.string().trim().email('Invalid email address format.').optional().or(z.literal('')).nullable(),
-    gstin: z.string().trim().toUpperCase().regex(gstinRegex, 'Invalid GSTIN format (e.g. 08AAAAA0000A1Z5).').optional().or(z.literal('')).nullable(),
-    pan: z.string().trim().toUpperCase().regex(panRegex, 'Invalid PAN format (e.g. AAAAA0000A).').optional().or(z.literal('')).nullable(),
+    gstin: preprocessGstin,
+    pan: preprocessPan,
     address: z.string().optional().nullable(),
     city: z.string().optional().nullable(),
     state: z.string().optional().nullable(),
@@ -32,8 +48,8 @@ export const updateSupplierSchema = z.object({
     companyName: z.string().optional().nullable(),
     mobileNumber: z.string().trim().regex(mobileRegex, 'Invalid 10-digit mobile number format.').optional(),
     email: z.string().trim().email('Invalid email address format.').optional().or(z.literal('')).nullable(),
-    gstin: z.string().trim().toUpperCase().regex(gstinRegex, 'Invalid GSTIN format.').optional().or(z.literal('')).nullable(),
-    pan: z.string().trim().toUpperCase().regex(panRegex, 'Invalid PAN format.').optional().or(z.literal('')).nullable(),
+    gstin: preprocessGstin,
+    pan: preprocessPan,
     address: z.string().optional().nullable(),
     city: z.string().optional().nullable(),
     state: z.string().optional().nullable(),
@@ -41,7 +57,7 @@ export const updateSupplierSchema = z.object({
     supplierType: z.string().optional(),
     creditLimit: z.number().nonnegative().optional(),
     paymentTerms: z.string().optional(),
-    status: z.enum(['ACTIVE', 'INACTIVE']).optional()
+    status: z.preprocess((val) => (typeof val === 'string' ? val.toUpperCase() : val), z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED'])).optional()
   }).passthrough()
 });
 

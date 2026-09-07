@@ -5,12 +5,12 @@ import { exportToExcel, exportToCSV } from '../../utils/export.utility.js';
 
 export const handleCreateSupplier = asyncHandler(async (req, res) => {
   const supplier = await supplierService.createSupplier(req.tenantId, req.body);
-  return res.status(201).json(new ApiResponse(201, supplier, 'Supplier registered successfully.'));
+  return ApiResponse.created(res, supplier, 'Supplier registered successfully.');
 });
 
 export const handleGetSuppliers = asyncHandler(async (req, res) => {
   const data = await supplierService.getSuppliers(req.tenantId, req.query);
-  return res.status(200).json(new ApiResponse(200, data, 'Suppliers list fetched successfully.'));
+  return ApiResponse.success(res, data, 'Suppliers list fetched successfully.');
 });
 
 
@@ -44,36 +44,36 @@ export const handleExportSuppliers = asyncHandler(async (req, res) => {
     return exportToCSV(res, { filename: 'suppliers_directory', columns, data: exportData });
   }
 
-  return res.status(200).json(new ApiResponse(200, exportData, 'Suppliers export dataset generated successfully.'));
+  return ApiResponse.success(res, exportData, 'Suppliers export dataset generated successfully.');
 });
 
 export const handleImportSuppliers = asyncHandler(async (req, res) => {
   const { suppliers } = req.body || {};
   const result = await supplierService.importSuppliers(req.tenantId, suppliers);
-  return res.status(201).json(new ApiResponse(201, result, 'Suppliers bulk imported successfully.'));
+  return ApiResponse.created(res, result, 'Suppliers bulk imported successfully.');
 });
 
 export const handleGetSupplierDetails = asyncHandler(async (req, res) => {
   const details = await supplierService.getSupplierDetails(req.tenantId, req.params.id);
-  return res.status(200).json(new ApiResponse(200, details, 'Supplier details fetched successfully.'));
+  return ApiResponse.success(res, details, 'Supplier details fetched successfully.');
 });
 
 export const handleGetSupplierLedger = asyncHandler(async (req, res) => {
   const ledger = await supplierService.getSupplierLedger(req.tenantId, req.params.id);
-  return res.status(200).json(new ApiResponse(200, ledger, 'Supplier account ledger generated successfully.'));
+  return ApiResponse.success(res, ledger, 'Supplier account ledger generated successfully.');
 });
 
 export const handleRecordSupplierPayment = asyncHandler(async (req, res) => {
   const payment = await supplierService.recordSupplierPayment(req.tenantId, req.user.id, req.params.id, req.body);
-  return res.status(201).json(new ApiResponse(201, payment, 'Supplier payment recorded successfully. Dues updated.'));
+  return ApiResponse.created(res, payment, 'Supplier payment recorded successfully. Dues updated.');
 });
 
 export const handleUpdateSupplier = asyncHandler(async (req, res) => {
   const updated = await supplierService.updateSupplier(req.tenantId, req.params.id, req.body);
-  return res.status(200).json(new ApiResponse(200, updated, 'Supplier details updated successfully.'));
+  return ApiResponse.success(res, updated, 'Supplier details updated successfully.');
 });
 
 export const handleDeleteSupplier = asyncHandler(async (req, res) => {
   await supplierService.deleteSupplier(req.tenantId, req.params.id);
-  return res.status(200).json(new ApiResponse(200, null, 'Supplier record deleted successfully.'));
+  return ApiResponse.success(res, null, 'Supplier record deleted successfully.');
 });

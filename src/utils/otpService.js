@@ -32,8 +32,17 @@ export const generateAndSendOTP = async (mobileNumber, purpose = 'AUTH', metadat
     }
   }
 
-  // Generate 6-digit numeric OTP
-  const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+  // Generate 6-digit numeric OTP (or Default OTP if configured)
+  const isDefaultOtpActive = process.env.USE_DEFAULT_OTP === 'true' || Boolean(process.env.DEFAULT_OTP);
+  const otpCode = isDefaultOtpActive
+    ? (process.env.DEFAULT_OTP || '123456')
+    : Math.floor(100000 + Math.random() * 900000).toString();
+
+  if (process.env.NODE_ENV === 'development' || isDefaultOtpActive) {
+    console.log(`\n======================================================`);
+    console.log(`🔑 [AUTH OTP GENERATED] Mobile: ${cleanMobile} | OTP CODE: ${otpCode} ${isDefaultOtpActive ? '(DEFAULT STATIC OTP ACTIVE)' : ''}`);
+    console.log(`======================================================\n`);
+  }
 
   // Expiry time set to 5 minutes from now
   const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
@@ -113,8 +122,12 @@ export const verifyOTP = async (mobileNumber, otpCode) => {
     throw new ApiError(400, 'OTP code has expired. Please click "Resend OTP" to receive a new code.');
   }
 
-  // 3. OTP Code Matching
-  if (record.otpCode !== cleanOTP) {
+  // 3. OTP Code Matching (supports DB OTP or configured DEFAULT_OTP)
+  const isDefaultOtpActive = process.env.USE_DEFAULT_OTP === 'true' || Boolean(process.env.DEFAULT_OTP);
+  const defaultOtpCode = process.env.DEFAULT_OTP || '123456';
+  const isMatch = (record.otpCode === cleanOTP) || (isDefaultOtpActive && cleanOTP === defaultOtpCode);
+
+  if (!isMatch) {
     const newAttempts = record.attempts + 1;
     const isLocked = newAttempts >= MAX_VERIFICATION_ATTEMPTS;
     const lockedUntil = isLocked ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000) : null;

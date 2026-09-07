@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { errorHandler } from './middlewares/error.middleware.js';
 
 // Route Imports
@@ -17,6 +19,9 @@ import purchaseRoutes from './modules/purchase/purchase.routes.js';
 import reportRoutes from './modules/report/report.routes.js';
 import supportRoutes from './modules/support/support.routes.js';
 import subscriptionRoutes from './modules/subscription/subscription.routes.js';
+import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
+import taxRoutes from './modules/tax/tax.routes.js';
+import uploadRoutes from './modules/upload/upload.routes.js';
 
 import { setupSwagger } from './config/swagger.js';
 
@@ -24,10 +29,58 @@ dotenv.config();
 
 const app = express();
 
-// Middlewares
-app.use(cors());
-app.use(express.json({ limit: '16kb', type: ['application/json', 'text/plain', 'application/*+json'] }));
-app.use(express.urlencoded({ extended: true, limit: '16kb' }));
+// Secure HTTP Headers with Helmet
+app.use(helmet());
+
+// Global Rate Limiting Security Configuration (300 req / 15 min)
+const globalApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes window
+  max: 300, // Limit each IP to 300 API requests per 15 mins
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    statusCode: 429,
+    success: false,
+    message: 'Rate limit exceeded. Too many requests sent to the server. Please slow down.'
+  }
+});
+
+// Apply Global Rate Limiter
+app.use('/api/', globalApiLimiter);
+
+// CORS Configuration for Frontend Integration
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
+  : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:8080', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, postman) or matching origins
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*') || (process.env.NODE_ENV === 'development' && allowedOrigins.includes(origin))) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS policy blocked access from origin: ${origin}`));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Tenant-ID',
+    'x-tenant-id',
+    'Accept',
+    'Origin',
+    'X-Requested-With'
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range', 'Content-Disposition']
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Enable preflight options across all routes
+
+app.use(express.json({ limit: '10mb', type: ['application/json', 'text/plain', 'application/*+json'] }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Setup Swagger API Documentation UI
 setupSwagger(app);
@@ -38,9 +91,13 @@ app.get('/health', (req, res) => {
 });
 
 // API v1 Routes
+app.use('/api/v1/dashboard', dashboardRoutes);
+app.use('/api/v1/upload', uploadRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/business', businessRoutes);
+app.use('/api/v1/taxes', taxRoutes);
+app.use('/api/v1/business/taxes', taxRoutes); // Backwards-compatible alias
 app.use('/api/v1/products', productRoutes);
 app.use('/api/v1/inventory', inventoryRoutes);
 app.use('/api/v1/customers', customerRoutes);
@@ -54,5 +111,6 @@ app.use('/api/v1/subscriptions', subscriptionRoutes);
 
 // Global Error Handler
 app.use(errorHandler);
+
 
 export default app;

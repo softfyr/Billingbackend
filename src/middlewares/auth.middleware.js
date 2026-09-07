@@ -36,7 +36,13 @@ export const authenticateToken = async (req, res, next) => {
     }
 
     req.user = user;
-    req.tenantId = user.tenantId;
+    // Strict Tenant Isolation: Only allow x-tenant-id header override for SUPER_ADMIN role.
+    // Regular users strictly use their assigned user.tenantId to prevent tenant spoofing.
+    if (user.role === 'SUPER_ADMIN') {
+      req.tenantId = req.headers['x-tenant-id'] || req.headers['X-Tenant-ID'] || user.tenantId || null;
+    } else {
+      req.tenantId = user.tenantId || null;
+    }
 
     next();
   } catch (error) {

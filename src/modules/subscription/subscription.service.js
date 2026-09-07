@@ -58,7 +58,9 @@ export const chooseInitialPackage = async (tenantId, data) => {
       message: 'Subscription package selected successfully.',
       hasSelectedPackage: true,
       isProfileComplete: updatedTenant.isProfileComplete || false,
-      redirectUrl: updatedTenant.isProfileComplete ? '/vendor/dashboard' : '/create-business-profile',
+      redirectUrl: updatedTenant.isProfileComplete
+        ? '/vendor/dashboard'
+        : (updatedTenant.profileStep === 2 ? '/create-business-profile/step-2' : '/create-business-profile/step-1'),
       tenant: updatedTenant,
       history
     };

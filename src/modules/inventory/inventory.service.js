@@ -14,7 +14,7 @@ export const getInventory = async (tenantId, filters = {}) => {
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
       { sku: { contains: search, mode: 'insensitive' } },
-      { barcode: { contains: search, mode: 'insensitive' } }
+      { hsnCode: { contains: search, mode: 'insensitive' } }
     ];
   }
 

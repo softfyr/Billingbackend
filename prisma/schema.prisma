@@ -59,7 +59,15 @@ enum PaymentMethod {
 }
 
 enum StockReason {
+  OPENING_STOCK
+  PURCHASE
   SALE
+  SALES_RETURN
+  PURCHASE_RETURN
+  STOCK_ADJUSTMENT
+  DAMAGE
+  SPOILAGE
+  CORRECTION
   CANCELLED_BILL
   RETURN
   NEW_PURCHASE
@@ -105,6 +113,7 @@ model Tenant {
   panNumber              String?
   otherInvoiceInfo       String?
   isProfileComplete      Boolean            @default(false)
+  profileStep            Int                @default(1)
   
   subscriptionStatus     SubscriptionStatus @default(FREE_TRIAL)
   accountStatus          AccountStatus      @default(ACTIVE)
@@ -127,6 +136,8 @@ model Tenant {
   supportTickets         SupportTicket[]
   subscriptionHistory    SubscriptionHistory[]
   stockHistory           StockHistory[]
+  notes                  TenantNote[]
+  activityLogs           TenantActivityLog[]
 
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
@@ -204,14 +215,46 @@ model SubscriptionHistory {
   packageId      String
   package        Package  @relation(fields: [packageId], references: [id])
   
+  actionType     String   @default("PAYMENT") // TRIAL_STARTED, SUBSCRIPTION_ACTIVATED, PACKAGE_UPGRADED, PACKAGE_CHANGED, TRIAL_EXTENDED, EXPIRY_UPDATED
+  actionBy       String   @default("System")
+  remarks        String?
+  billingCycle   String   @default("Monthly") // Monthly, Yearly, Free Trial
+  
   amount         Float
   paymentMethod  PaymentMethod @default(CARD)
-  paymentStatus  String   // SUCCESS, FAILED, PENDING
+  paymentGateway String?  @default("Razorpay")
+  paymentStatus  String   // SUCCESS, FAILED, PENDING, REFUNDED
   transactionId  String?
   startDate      DateTime
   expiryDate     DateTime
 
   createdAt      DateTime @default(now())
+}
+
+model TenantNote {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  authorId    String?
+  authorName  String   @default("Admin")
+  noteText    String
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TenantActivityLog {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  actionType  String   // LOGIN, INVOICE_CREATED, SUBSCRIPTION_UPDATED, ACCOUNT_STATUS_CHANGED, PROFILE_UPDATED, NOTE_ADDED
+  description String
+  ipAddress   String?
+  performedBy String?  @default("System")
+  
+  createdAt   DateTime @default(now())
 }
 
 model Category {
@@ -271,9 +314,13 @@ model Product {
   
   name             String
   sku              String?
-  barcode          String?
+  hsnCode          String?
   brand            String?
-  unit             String?        @default("Pcs")
+    unit             String?        @default("Pcs")
+  hasSecondaryUnit       Boolean        @default(false)
+  secondaryUnit          String?
+  conversionFactor       Float?         @default(1)
+  secondaryPurchasePrice Float?
   purchasePrice    Float          @default(0)
   sellingPrice     Float
   mrp              Float?
@@ -282,11 +329,11 @@ model Product {
   taxId            String?
   tax              Tax?           @relation(fields: [taxId], references: [id])
   
-  openingStock     Int            @default(0)
-  currentStock     Int            @default(0)
-  maxStockLevel    Int            @default(0)
-  minStockLevel    Int            @default(5)
-  stockAlertQuantity Int          @default(5)
+  openingStock     Float          @default(0)
+  currentStock     Float          @default(0)
+  maxStockLevel    Float          @default(0)
+  minStockLevel    Float          @default(5)
+  stockAlertQuantity Float        @default(5)
   enableStockAlert Boolean        @default(true)
   
   productImage     String?
@@ -305,7 +352,6 @@ model Product {
   updatedAt        DateTime     @updatedAt
 
   @@unique([tenantId, sku])
-  @@unique([tenantId, barcode])
 }
 
 model Customer {
@@ -431,9 +477,9 @@ model StockHistory {
   productId        String
   product          Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
   
-  previousStock    Int
-  addedRemovedQty  Int         // Positive for addition, negative for deduction
-  updatedStock     Int
+  previousStock    Float
+  addedRemovedQty  Float       // Positive for addition, negative for deduction
+  updatedStock     Float
   reason           StockReason
   
   updatedByUserId  String

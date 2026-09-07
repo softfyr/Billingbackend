@@ -160,3 +160,29 @@ export const exportToPDFTable = async (res, options = {}) => {
 
   doc.end();
 };
+
+import { ApiResponse } from './apiResponse.js';
+
+/**
+ * 🔄 Unified Export Dispatcher Utility
+ * Automatically handles Excel, CSV, and JSON format responses to eliminate controller duplication.
+ */
+export const handleDataExport = async (res, options = {}) => {
+  const {
+    format = 'json',
+    filename = 'export_data',
+    sheetName = 'Sheet1',
+    columns = [],
+    data = []
+  } = options;
+
+  const fmt = format.toString().toLowerCase();
+
+  if (fmt === 'excel' || fmt === 'xlsx') {
+    return await exportToExcel(res, { filename, sheetName, columns, data });
+  } else if (fmt === 'csv') {
+    return exportToCSV(res, { filename, columns, data });
+  }
+
+  return res.status(200).json(new ApiResponse(200, data, 'Export dataset generated successfully.'));
+};

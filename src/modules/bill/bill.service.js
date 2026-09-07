@@ -54,19 +54,31 @@ export const generateBill = async (tenantId, userId, data) => {
         throw new ApiError(400, `Insufficient stock for product '${product.name}'. Available: ${product.currentStock}, Requested: ${qty}.`);
       }
 
+      const pTaxType = (product.taxType || '').toUpperCase();
+      const iTaxType = (item.taxType || '').toUpperCase();
+      const isInclusive = ['INCLUSIVE', 'GST_INCLUSIVE'].includes(pTaxType) || ['INCLUSIVE', 'GST_INCLUSIVE'].includes(iTaxType);
       const unitPrice = product.sellingPrice;
       const itemDiscount = item.discountAmount ? parseFloat(item.discountAmount) : 0;
-      const itemSubtotal = (unitPrice * qty) - itemDiscount;
+      const rawLineNet = (unitPrice * qty) - itemDiscount;
 
       let taxPercent = 0;
       let taxAmount = 0;
+      let itemSubtotal = 0;
+      let lineTotal = 0;
 
       if (product.tax && product.tax.status === 'ACTIVE') {
         taxPercent = product.tax.percentage;
-        taxAmount = (itemSubtotal * taxPercent) / 100;
       }
 
-      const lineTotal = itemSubtotal + taxAmount;
+      if (isInclusive && taxPercent > 0) {
+        itemSubtotal = Math.round((rawLineNet / (1 + (taxPercent / 100))) * 100) / 100;
+        taxAmount = Math.round((rawLineNet - itemSubtotal) * 100) / 100;
+        lineTotal = rawLineNet;
+      } else {
+        itemSubtotal = Math.round(rawLineNet * 100) / 100;
+        taxAmount = Math.round(((itemSubtotal * taxPercent) / 100) * 100) / 100;
+        lineTotal = Math.round((itemSubtotal + taxAmount) * 100) / 100;
+      }
 
       subtotal += itemSubtotal;
       totalTaxAmount += taxAmount;
@@ -83,6 +95,9 @@ export const generateBill = async (tenantId, userId, data) => {
         lineTotal
       });
     }
+
+    subtotal = Math.round(subtotal * 100) / 100;
+    totalTaxAmount = Math.round(totalTaxAmount * 100) / 100;
 
     // 3. Calculate Discount
     let discountAmount = 0;
@@ -111,9 +126,10 @@ export const generateBill = async (tenantId, userId, data) => {
       actualDueAmount = Math.max(0, grandTotal - actualPaidAmount);
     }
 
-    // 5. Generate Invoice Number (Format: INV-1001)
+    // 5. Generate Collision-Safe Invoice Number (Format: INV-1001-A4F8)
     const billCount = await tx.bill.count({ where: { tenantId } });
-    const invoiceNumber = `INV-${String(billCount + 1001)}`;
+    const microHash = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const invoiceNumber = `INV-${String(billCount + 1001)}-${microHash}`;
 
     // 6. Create Bill Record
     const bill = await tx.bill.create({

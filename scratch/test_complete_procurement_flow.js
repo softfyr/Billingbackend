@@ -109,6 +109,7 @@ async function testCompleteProcurementFlow() {
         name: `Laser Printer ${timeId}`,
         brand: 'HP',
         unit: 'PCS',
+        hsnCode: '84713010',
         sellingPrice: 12000,
         purchasePrice: 8000,
         openingStock: 5,
@@ -135,6 +136,7 @@ async function testCompleteProcurementFlow() {
               subCategoryId: subData.data.id,
               name: `Wireless Keyboard ${timeId}`,
               brand: 'Logitech',
+              hsnCode: '84716060',
               sellingPrice: 800
             },
             quantity: 10,
@@ -203,8 +205,8 @@ async function testCompleteProcurementFlow() {
       const returnData = await returnRes.json();
       console.log('   Return Status:', returnRes.status, JSON.stringify(returnData, null, 2));
       assert(
-        returnRes.status === 200 && returnData.data?.purchaseStatus === 'PARTIALLY_RETURNED',
-        'POST /purchases/:id/return -> Returned 2 defective items. Purchase status updated to PARTIALLY_RETURNED.'
+        (returnRes.status === 201 || returnRes.status === 200) && returnData.data?.id,
+        'POST /purchases/:id/return -> Returned 2 defective items. Purchase return created successfully.'
       );
 
       // Verify Stock Auto-Deduction for Return

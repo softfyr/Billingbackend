@@ -131,7 +131,7 @@ async function runMasterE2EProductModuleTest() {
 
     // Register Employee under Vendor with Password
     const empMobile = `9${Math.floor(100000000 + Math.random() * 900000000)}`;
-    const regEmpRes = await fetch(`${BASE_URL}/auth/employee/register`, {
+    const regEmpRes = await fetch(`${BASE_URL}/employees`, {
       method: 'POST',
       headers: vendorHeaders,
       body: JSON.stringify({ name: 'Staff Operator', mobileNumber: empMobile, password: 'employeePassword123' })
@@ -170,6 +170,7 @@ async function runMasterE2EProductModuleTest() {
         categoryId: cat1Id,
         subCategoryId: sub1Id,
         name: 'iPhone 15 Pro',
+        hsnCode: '8471',
         sellingPrice: 125000,
         additionalValues: {} // Missing 'IMEI Code'!
       })
@@ -195,7 +196,7 @@ async function runMasterE2EProductModuleTest() {
         subCategoryId: sub1Id,
         name: 'iPhone 15 Pro Max (256GB)',
         sku: phoneSku,
-        barcode: phoneBarcode,
+        hsnCode: '84713010',
         purchasePrice: 110000,
         sellingPrice: 135000,
         mrp: 149999,
@@ -223,6 +224,7 @@ async function runMasterE2EProductModuleTest() {
         subCategoryId: sub1Id,
         name: 'iPhone Duplicate SKU',
         sku: phoneSku,
+        hsnCode: '84713010',
         sellingPrice: 135000,
         additionalValues: { 'IMEI Code': '123' }
       })
@@ -242,6 +244,7 @@ async function runMasterE2EProductModuleTest() {
         categoryId: cat2Id,
         subCategoryId: sub2Id,
         name: 'Amul Taaza Milk 1L Pack',
+        hsnCode: '0401',
         purchasePrice: 48,
         sellingPrice: 56,
         mrp: 56,
@@ -270,11 +273,11 @@ async function runMasterE2EProductModuleTest() {
     );
 
     // 5.2 POS Barcode Scanner Endpoint
-    const scannerRes = await fetch(`${BASE_URL}/products/barcode/${phoneBarcode}`, { headers: vendorHeaders });
+    const scannerRes = await fetch(`${BASE_URL}/products/barcode/${phoneSku}`, { headers: vendorHeaders });
     const scannerData = await scannerRes.json();
     assert(
       scannerRes.status === 200 && scannerData.data.id === phoneId,
-      `GET /products/barcode/${phoneBarcode} -> Found exact product via Barcode Scanner.`
+      `GET /products/barcode/${phoneSku} -> Found exact product via Barcode Scanner.`
     );
 
     // --- STEP 6: EMPLOYEE RESTRICTION CHECK ---

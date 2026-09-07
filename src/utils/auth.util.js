@@ -1,5 +1,9 @@
 import jwt from 'jsonwebtoken';
 
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET.includes('super-secret-jwt-key'))) {
+  console.warn('⚠️ [SECURITY WARNING] Using default or weak JWT_SECRET in production. Please set a strong secret in .env!');
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-jwt-key-softfyr-billing-saas';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || (JWT_SECRET + '-refresh-secret-key');
 
@@ -94,6 +98,7 @@ export const formatUserResponse = (user, tenant = null, extraProps = {}) => {
       businessName: tenant.businessName,
       subscriptionStatus: tenant.subscriptionStatus,
       isProfileComplete: tenant.isProfileComplete,
+      profileStep: tenant.profileStep || 1,
       currentPackageId: tenant.currentPackageId || null
     } : null
   };

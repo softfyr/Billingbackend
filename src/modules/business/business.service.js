@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../utils/apiError.js';
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
 
 export const getVendorDashboard = async (tenantId) => {
   const totalCustomers = await prisma.customer.count({ where: { tenantId } });
@@ -63,90 +64,157 @@ export const createBusinessProfile = async (tenantId, data = {}) => {
   }
 
   const {
+    step,
     businessName: bName,
     storeName,
     name,
     business_name,
     businessType,
+    category,
     ownerName,
     businessLogo,
     mobileNumber,
     email,
     businessAddress,
+    address,
     city,
     state,
     country,
     pincode,
     gstNumber,
+    gstin,
     panNumber,
     otherInvoiceInfo,
-    skipSetup
+    invoiceTerms
   } = data || {};
 
-  const inputBusinessName = bName || storeName || name || business_name;
+  const cleanMobile = mobileNumber ? mobileNumber.toString().trim().replace(/\D/g, '').slice(-10) : null;
+  if (cleanMobile && cleanMobile.length === 10 && cleanMobile !== existingTenant.mobileNumber) {
+    throw new ApiError(400, 'Registered mobile number cannot be modified. Your phone number is locked as your primary login identity.');
+  }
+
+  const cleanEmail = (email && typeof email === 'string' && email.trim()) ? email.trim().toLowerCase() : null;
+  if (cleanEmail && cleanEmail !== existingTenant.email) {
+    const existingTenantEmail = await prisma.tenant.findFirst({ where: { email: cleanEmail, NOT: { id: tenantId } } });
+    const existingUserEmail = await prisma.user.findFirst({ where: { email: cleanEmail, NOT: { tenantId } } });
+    if (existingTenantEmail || existingUserEmail) {
+      throw new ApiError(409, 'Email address is already registered with another account.');
+    }
+  }
+
+  const targetStep = Number(step) || (step === 'step1' ? 1 : (step === 'step2' ? 2 : null));
+
+  const inputOwnerName = ownerName || name;
+  const cleanOwnerName = (inputOwnerName && typeof inputOwnerName === 'string' && inputOwnerName.trim())
+    ? inputOwnerName.trim()
+    : null;
+
+  if (targetStep === 1) {
+    // Step 1: Owner Information Setup
+    const updatedTenant = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        ...(cleanOwnerName && { ownerName: cleanOwnerName }),
+        ...(cleanEmail && { email: cleanEmail }),
+        profileStep: 2,
+        isProfileComplete: false
+      },
+      include: { currentPackage: true }
+    });
+
+    if (cleanOwnerName || cleanEmail) {
+      await prisma.user.updateMany({
+        where: { tenantId, role: 'TENANT_ADMIN' },
+        data: {
+          ...(cleanOwnerName && { name: cleanOwnerName }),
+          ...(cleanEmail && { email: cleanEmail })
+        }
+      });
+    }
+
+    const hasSelectedPackage = !!updatedTenant.currentPackageId;
+    return {
+      ...updatedTenant,
+      redirectUrl: '/create-business-profile/step-2',
+      profileStep: 2,
+      isProfileComplete: false,
+      hasSelectedPackage
+    };
+  }
+
+  // Step 2 / Full Profile Setup & Completion
+  const inputBusinessName = bName || storeName || business_name;
   const finalBusinessName = (inputBusinessName && typeof inputBusinessName === 'string' && inputBusinessName.trim())
     ? inputBusinessName.trim()
     : existingTenant.businessName;
 
-  // Fallback: If package wasn't chosen prior, auto assign default free trial
-  let packageIdToAssign = existingTenant.currentPackageId;
-  if (!packageIdToAssign) {
-    let freeTrialPkg = await prisma.package.findFirst({ where: { isFreeTrial: true, status: 'ACTIVE' } });
-    if (!freeTrialPkg) {
-      freeTrialPkg = await prisma.package.create({
-        data: {
-          packageName: 'Free Trial',
-          description: 'Standard 30-Day Free Trial Package',
-          durationMonths: 1,
-          amount: 0,
-          isFreeTrial: true,
-          status: 'ACTIVE'
-        }
-      });
+  const finalBusinessType = (businessType || category || '').toString().trim();
+  const finalAddress = (businessAddress || address || '').toString().trim();
+  const finalGst = (gstNumber || gstin || '').toString().trim().toUpperCase();
+  const finalInvoiceInfo = (otherInvoiceInfo || invoiceTerms || '').toString().trim();
+
+  // Process Business Logo Upload to Cloudinary if provided
+  let uploadedLogoUrl = existingTenant.businessLogo;
+  if (businessLogo) {
+    const uploadRes = await uploadToCloudinary(businessLogo, 'billing_saas/logos');
+    if (uploadRes && uploadRes.url) {
+      if (existingTenant.businessLogo && existingTenant.businessLogo !== uploadRes.url) {
+        await deleteFromCloudinary(existingTenant.businessLogo);
+      }
+      uploadedLogoUrl = uploadRes.url;
     }
-    packageIdToAssign = freeTrialPkg.id;
   }
 
   const updatedTenant = await prisma.tenant.update({
     where: { id: tenantId },
     data: {
-      businessName: finalBusinessName || `${existingTenant.ownerName || 'Vendor'}'s Store`,
-      currentPackageId: packageIdToAssign,
-      ...(businessType && { businessType: businessType.trim() }),
-      ...(ownerName && { ownerName: ownerName.trim() }),
-      ...(businessLogo && { businessLogo }),
-      ...(mobileNumber && { mobileNumber }),
-      ...(email && { email: email.trim().toLowerCase() }),
-      ...(businessAddress && { businessAddress: businessAddress.trim() }),
-      ...(city && { city: city.trim() }),
-      ...(state && { state: state.trim() }),
-      ...(country && { country: country.trim() }),
-      ...(pincode && { pincode: pincode.trim() }),
-      ...(gstNumber && { gstNumber: gstNumber.trim().toUpperCase() }),
-      ...(panNumber && { panNumber: panNumber.trim().toUpperCase() }),
-      ...(otherInvoiceInfo && { otherInvoiceInfo }),
+      businessName: finalBusinessName || `${cleanOwnerName || existingTenant.ownerName || 'Vendor'}'s Store`,
+      ...(finalBusinessType && { businessType: finalBusinessType }),
+      ...(uploadedLogoUrl && { businessLogo: uploadedLogoUrl }),
+      ...(cleanEmail && { email: cleanEmail }),
+      ...(finalAddress && { businessAddress: finalAddress }),
+      ...(city && { city: city.toString().trim() }),
+      ...(state && { state: state.toString().trim() }),
+      ...(country && { country: country.toString().trim() }),
+      ...(pincode && { pincode: pincode.toString().trim() }),
+      ...(finalGst && { gstNumber: finalGst }),
+      ...(panNumber && { panNumber: panNumber.toString().trim().toUpperCase() }),
+      ...(finalInvoiceInfo && { otherInvoiceInfo: finalInvoiceInfo }),
+      ...(cleanOwnerName && { ownerName: cleanOwnerName }),
+      profileStep: 2,
       isProfileComplete: true
     },
     include: { currentPackage: true }
   });
 
-  // Keep primary User account in sync with Owner Name & Email
-  if (ownerName || email) {
+  if (cleanOwnerName || cleanEmail) {
     await prisma.user.updateMany({
       where: { tenantId, role: 'TENANT_ADMIN' },
       data: {
-        ...(ownerName && { name: ownerName.trim() }),
-        ...(email && { email: email.trim().toLowerCase() })
+        ...(cleanOwnerName && { name: cleanOwnerName }),
+        ...(cleanEmail && { email: cleanEmail })
       }
     });
   }
 
+  const hasSelectedPackage = !!updatedTenant.currentPackageId;
+  const redirectUrl = hasSelectedPackage ? '/vendor/dashboard' : '/choose-package';
+
   return {
     ...updatedTenant,
-    redirectUrl: '/vendor/dashboard',
+    redirectUrl,
+    profileStep: 2,
     isProfileComplete: true,
-    hasSelectedPackage: true
+    hasSelectedPackage
   };
+};
+
+export const createBusinessProfileStep1 = async (tenantId, data = {}) => {
+  return createBusinessProfile(tenantId, { ...data, step: 1 });
+};
+
+export const createBusinessProfileStep2 = async (tenantId, data = {}) => {
+  return createBusinessProfile(tenantId, { ...data, step: 2 });
 };
 
 export const updateBusinessInfo = async (tenantId, data = {}) => {
@@ -161,50 +229,83 @@ export const updateBusinessInfo = async (tenantId, data = {}) => {
     name,
     business_name,
     businessType,
+    category,
     ownerName,
     businessLogo,
     mobileNumber,
     email,
     businessAddress,
+    address,
     city,
     state,
     country,
     pincode,
     gstNumber,
+    gstin,
     panNumber,
-    otherInvoiceInfo
+    otherInvoiceInfo,
+    invoiceTerms
   } = data || {};
 
+  const cleanMobile = mobileNumber ? mobileNumber.toString().trim().replace(/\D/g, '').slice(-10) : null;
+  if (cleanMobile && cleanMobile.length === 10 && cleanMobile !== existingTenant.mobileNumber) {
+    throw new ApiError(400, 'Registered mobile number cannot be modified. Your phone number is locked as your primary login identity.');
+  }
+
+  const cleanEmail = (email && typeof email === 'string' && email.trim()) ? email.trim().toLowerCase() : null;
+  if (cleanEmail && cleanEmail !== existingTenant.email) {
+    const existingTenantEmail = await prisma.tenant.findFirst({ where: { email: cleanEmail, NOT: { id: tenantId } } });
+    const existingUserEmail = await prisma.user.findFirst({ where: { email: cleanEmail, NOT: { tenantId } } });
+    if (existingTenantEmail || existingUserEmail) {
+      throw new ApiError(409, 'Email address is already registered with another account.');
+    }
+  }
+
   const inputBusinessName = bName || storeName || name || business_name;
+  const finalBusinessType = (businessType || category || '').toString().trim();
+  const finalAddress = (businessAddress || address || '').toString().trim();
+  const finalGst = (gstNumber || gstin || '').toString().trim().toUpperCase();
+  const finalInvoiceInfo = (otherInvoiceInfo || invoiceTerms || '').toString().trim();
+
+  // Process Business Logo Upload to Cloudinary if provided
+  let uploadedLogoUrl = existingTenant.businessLogo;
+  if (businessLogo) {
+    const uploadRes = await uploadToCloudinary(businessLogo, 'billing_saas/logos');
+    if (uploadRes && uploadRes.url) {
+      if (existingTenant.businessLogo && existingTenant.businessLogo !== uploadRes.url) {
+        await deleteFromCloudinary(existingTenant.businessLogo);
+      }
+      uploadedLogoUrl = uploadRes.url;
+    }
+  }
 
   const updatedTenant = await prisma.tenant.update({
     where: { id: tenantId },
     data: {
-      ...(inputBusinessName && { businessName: inputBusinessName.trim() }),
-      ...(businessType && { businessType: businessType.trim() }),
-      ...(ownerName && { ownerName: ownerName.trim() }),
-      ...(businessLogo && { businessLogo }),
-      ...(mobileNumber && { mobileNumber }),
-      ...(email && { email: email.trim().toLowerCase() }),
-      ...(businessAddress && { businessAddress: businessAddress.trim() }),
-      ...(city && { city: city.trim() }),
-      ...(state && { state: state.trim() }),
-      ...(country && { country: country.trim() }),
-      ...(pincode && { pincode: pincode.trim() }),
-      ...(gstNumber && { gstNumber: gstNumber.trim().toUpperCase() }),
-      ...(panNumber && { panNumber: panNumber.trim().toUpperCase() }),
-      ...(otherInvoiceInfo && { otherInvoiceInfo }),
+      ...(inputBusinessName && { businessName: inputBusinessName.toString().trim() }),
+      ...(finalBusinessType && { businessType: finalBusinessType }),
+      ...(ownerName && { ownerName: ownerName.toString().trim() }),
+      ...(uploadedLogoUrl && { businessLogo: uploadedLogoUrl }),
+      ...(cleanEmail && { email: cleanEmail }),
+      ...(finalAddress && { businessAddress: finalAddress }),
+      ...(city && { city: city.toString().trim() }),
+      ...(state && { state: state.toString().trim() }),
+      ...(country && { country: country.toString().trim() }),
+      ...(pincode && { pincode: pincode.toString().trim() }),
+      ...(finalGst && { gstNumber: finalGst }),
+      ...(panNumber && { panNumber: panNumber.toString().trim().toUpperCase() }),
+      ...(finalInvoiceInfo && { otherInvoiceInfo: finalInvoiceInfo }),
       isProfileComplete: true
     },
     include: { currentPackage: true }
   });
 
-  if (ownerName || email) {
+  if (ownerName || cleanEmail) {
     await prisma.user.updateMany({
       where: { tenantId, role: 'TENANT_ADMIN' },
       data: {
-        ...(ownerName && { name: ownerName.trim() }),
-        ...(email && { email: email.trim().toLowerCase() })
+        ...(ownerName && { name: ownerName.toString().trim() }),
+        ...(cleanEmail && { email: cleanEmail })
       }
     });
   }
@@ -286,48 +387,4 @@ export const getVendorProfile = async (userId) => {
       }
     } : null
   };
-};
-
-// --- Tax Management ---
-export const createTax = async (tenantId, data) => {
-  const { name, percentage, type, status } = data;
-
-  return await prisma.tax.create({
-    data: {
-      tenantId,
-      name,
-      percentage: parseFloat(percentage),
-      type: type || 'PERCENTAGE',
-      status: status || 'ACTIVE'
-    }
-  });
-};
-
-export const getTaxes = async (tenantId) => {
-  return await prisma.tax.findMany({
-    where: { tenantId },
-    orderBy: { name: 'asc' }
-  });
-};
-
-export const updateTax = async (tenantId, taxId, data) => {
-  const tax = await prisma.tax.findFirst({ where: { id: taxId, tenantId } });
-  if (!tax) throw new ApiError(404, 'Tax record not found.');
-
-  return await prisma.tax.update({
-    where: { id: taxId },
-    data: {
-      ...(data.name && { name: data.name }),
-      ...(data.percentage !== undefined && { percentage: parseFloat(data.percentage) }),
-      ...(data.type && { type: data.type }),
-      ...(data.status && { status: data.status })
-    }
-  });
-};
-
-export const deleteTax = async (tenantId, taxId) => {
-  const tax = await prisma.tax.findFirst({ where: { id: taxId, tenantId } });
-  if (!tax) throw new ApiError(404, 'Tax record not found.');
-
-  return await prisma.tax.delete({ where: { id: taxId } });
 };

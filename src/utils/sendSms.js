@@ -7,6 +7,12 @@ dotenv.config();
  */
 export const sendSMS = async (mobileNumber, message) => {
   try {
+    console.log(`\n======================================================`);
+    console.log(`📱 [TERMINAL OTP CONSOLE LOG]`);
+    console.log(`   Mobile Number : ${mobileNumber}`);
+    console.log(`   SMS Content   : "${message}"`);
+    console.log(`======================================================\n`);
+
     const provider = process.env.SMS_PROVIDER || 'CONSOLE';
 
     if (provider === 'TWILIO') {
@@ -82,7 +88,8 @@ export const sendSMS = async (mobileNumber, message) => {
         const url = `${baseUrl}?${queryParams.toString()}`;
         const response = await fetch(url);
         const textResult = await response.text();
-        console.log(`📲 [TrueBulkSMS Sent to ${mobileNumber}]: Response ->`, textResult);
+        const shortResponse = textResult && textResult.includes('<html') ? '[HTML Response Received]' : textResult.substring(0, 100);
+        console.log(`📲 [TrueBulkSMS Status for ${mobileNumber}]: ${shortResponse}`);
         return { success: true, response: textResult };
       }
     }

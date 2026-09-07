@@ -185,8 +185,9 @@ async function testMasterE2EProductModuleV2() {
     // 8. Test 5: List & Filter Products (`GET /products`)
     const listRes = await fetch(`${BASE_URL}/products?brand=Samsung&search=Galaxy`, { headers: vendorHeaders });
     const listData = await listRes.json();
+    const prodList = listData.data?.products || listData.data?.items || listData.data;
     assert(
-      listRes.status === 200 && Array.isArray(listData.data) && listData.data.length >= 1,
+      listRes.status === 200 && Array.isArray(prodList) && prodList.length >= 1,
       '5. GET /products -> Listed products with Brand and Search filters.'
     );
 

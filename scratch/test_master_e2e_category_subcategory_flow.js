@@ -146,6 +146,7 @@ async function testMasterCategorySubCategoryFlow() {
         categoryId,
         subCategoryId,
         name: 'Paracetamol 500mg',
+        hsnCode: '3004',
         sellingPrice: 40,
         purchasePrice: 25,
         additionalValues: { 'Batch Number': 'ABC123' }
@@ -165,6 +166,7 @@ async function testMasterCategorySubCategoryFlow() {
         categoryId,
         subCategoryId,
         name: 'Paracetamol 500mg',
+        hsnCode: '3004',
         sellingPrice: 40,
         purchasePrice: 25,
         expiryDate: '2027-09-15',
