@@ -49,17 +49,38 @@ const globalApiLimiter = rateLimit({
 app.use('/api/', globalApiLimiter);
 
 // CORS Configuration for Frontend Integration
-const allowedOrigins = process.env.CORS_ORIGIN
+const defaultAllowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:8080',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+  'https://softfyr-billing-frontend.vercel.app'
+];
+
+const processCorsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
-  : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:8080', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'];
+  : [];
+
+const allowedOrigins = [...defaultAllowedOrigins, ...processCorsOrigins];
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, postman) or matching origins
-    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*') || (process.env.NODE_ENV === 'development' && allowedOrigins.includes(origin))) {
+    // Allow requests with no origin (mobile apps, curl, postman)
+    if (!origin) return callback(null, true);
+
+    const isAllowed =
+      allowedOrigins.includes(origin) ||
+      allowedOrigins.includes('*') ||
+      process.env.CORS_ORIGIN === '*' ||
+      origin.endsWith('.vercel.app');
+
+    if (isAllowed) {
       callback(null, true);
     } else {
-      callback(new Error(`CORS policy blocked access from origin: ${origin}`));
+      console.warn(`[CORS Warning] Origin blocked: ${origin}`);
+      callback(null, false);
     }
   },
   credentials: true,
