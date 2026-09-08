@@ -2,7 +2,7 @@ services:
   - type: web
     name: multi-tenant-billing-backend
     runtime: node
-    buildCommand: npm install && npx prisma generate && npx prisma db push
+    buildCommand: npm install && npx prisma generate && npx prisma db push && npx prisma db seed
     startCommand: npm start
     envVars:
       - key: DATABASE_URL
