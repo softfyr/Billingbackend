@@ -129,6 +129,9 @@ app.use('/api/v1/purchases', purchaseRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/support', supportRoutes);
 app.use('/api/v1/subscriptions', subscriptionRoutes);
+app.use('/api/v1/subscription', subscriptionRoutes); // Backwards-compatible alias for singular 'subscription'
+app.use('/api/v1/business/subscriptions', subscriptionRoutes);
+app.use('/api/v1/business/subscription', subscriptionRoutes);
 
 // Global Error Handler
 app.use(errorHandler);

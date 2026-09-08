@@ -13,6 +13,8 @@ router.get('/packages', subscriptionController.handleGetAvailablePackagesForVend
 // Package Selection during Onboarding
 router.post('/choose-package', requireRole(['TENANT_ADMIN']), validate(choosePackageSchema), subscriptionController.handleChooseInitialPackage);
 router.post('/select-package', requireRole(['TENANT_ADMIN']), validate(choosePackageSchema), subscriptionController.handleChooseInitialPackage);
+router.post('/choose', requireRole(['TENANT_ADMIN']), validate(choosePackageSchema), subscriptionController.handleChooseInitialPackage);
+router.post('/select', requireRole(['TENANT_ADMIN']), validate(choosePackageSchema), subscriptionController.handleChooseInitialPackage);
 
 // Subscriptions upgrade reserved for Vendor TENANT_ADMIN
 router.post('/upgrade', requireRole(['TENANT_ADMIN']), validate(upgradeSubscriptionSchema), subscriptionController.handleUpgradeVendorSubscription);
