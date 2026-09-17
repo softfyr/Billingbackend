@@ -7,9 +7,9 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "build": "prisma generate",
+    "build": "prisma generate && prisma db push --accept-data-loss",
     "prisma:generate": "prisma generate",
-    "prisma:db:push": "prisma db push",
+    "prisma:db:push": "prisma db push --accept-data-loss",
     "prisma:seed": "prisma db seed"
   },
   "prisma": {
