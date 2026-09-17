@@ -16,6 +16,7 @@ router.get('/structure/:subCategoryId', productController.handleGetCategoryField
 
 // Specialized Product Searches & Alerts
 router.get('/low-stock', productController.handleGetLowStockProducts);
+router.get('/sku/:sku', productController.handleGetProductBySku);
 router.get('/barcode/:barcode', productController.handleGetProductByBarcode);
 
 // Product CRUD, Import & Export
@@ -24,6 +25,7 @@ router.post('/import', validate(importProductsSchema), productController.handleI
 router.post('/', uploadSingleImage('productImage'), validate(createProductSchema), productController.handleCreateProduct);
 router.get('/', productController.handleGetProducts);
 router.get('/:id', productController.handleGetProductDetails);
+router.get('/:id/stock-history', productController.handleGetProductStockHistory);
 router.put('/:id', uploadSingleImage('productImage'), validate(updateProductSchema), productController.handleUpdateProduct);
 router.post('/:id/stock-adjustment', validate(stockAdjustmentSchema), productController.handleAdjustProductStock);
 

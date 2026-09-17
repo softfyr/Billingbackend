@@ -69,10 +69,6 @@ enum StockReason {
   SPOILAGE
   CORRECTION
   CANCELLED_BILL
-  RETURN
-  NEW_PURCHASE
-  MANUAL_ADJUSTMENT
-  DAMAGED
   LOST
 }
 
@@ -136,6 +132,8 @@ model Tenant {
   supportTickets         SupportTicket[]
   subscriptionHistory    SubscriptionHistory[]
   stockHistory           StockHistory[]
+  billItems              BillItem[]
+  billReturns            BillReturn[]
   notes                  TenantNote[]
   activityLogs           TenantActivityLog[]
 
@@ -333,6 +331,8 @@ model Product {
   currentStock     Float          @default(0)
   maxStockLevel    Float          @default(0)
   minStockLevel    Float          @default(5)
+  reorderLevel     Float?         @default(10)
+  reorderQuantity  Float?         @default(50)
   stockAlertQuantity Float        @default(5)
   enableStockAlert Boolean        @default(true)
   
@@ -359,7 +359,12 @@ model Customer {
   tenantId            String
   tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
+  customerType        String   @default("B2C")
   name                String
+  businessName        String?
+  gstin               String?
+  contactPerson       String?
+  shippingAddress     String?
   mobileNumber        String
   email               String?
   address             String?
@@ -367,6 +372,11 @@ model Customer {
   state               String?
   country             String?  @default("India")
   pincode             String?
+  panNumber           String?
+  stateCode           String?
+  creditPeriodDays    Int?     @default(30)
+  creditLimit         Float?   @default(0)
+  status              AccountStatus @default(ACTIVE)
   
   totalInvoices       Int      @default(0)
   totalPurchaseAmount Float    @default(0)
@@ -380,6 +390,9 @@ model Customer {
   updatedAt           DateTime @updatedAt
 
   @@unique([tenantId, mobileNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, customerType])
+  @@index([tenantId, createdAt])
 }
 
 model Tax {
@@ -403,12 +416,26 @@ model Bill {
   tenantId          String
   tenant            Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
+  billType          String        @default("B2C")
   invoiceNumber     String
   customerId        String
   customer          Customer      @relation(fields: [customerId], references: [id])
   
+  customerName      String?
+  customerMobile    String?
+  businessName      String?
+  gstin             String?
+  panNumber         String?
+  contactPerson     String?
+  shippingAddress   String?
+  stateCode         String?
+  
   subtotal          Float
   totalTaxAmount    Float         @default(0)
+  cgstAmount        Float         @default(0)
+  sgstAmount        Float         @default(0)
+  igstAmount        Float         @default(0)
+  roundOff          Float         @default(0)
   
   discountType      DiscountType  @default(NONE)
   discountValue     Float         @default(0)
@@ -431,10 +458,17 @@ model Bill {
   updatedAt         DateTime      @updatedAt
 
   @@unique([tenantId, invoiceNumber])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([tenantId, customerId])
+  @@index([tenantId, billType])
 }
 
 model BillItem {
   id               String   @id @default(uuid())
+  tenantId         String?
+  tenant           Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   billId           String
   bill             Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
   
@@ -442,8 +476,13 @@ model BillItem {
   product          Product  @relation(fields: [productId], references: [id])
   
   sku              String?
-  quantity         Int
-  returnedQuantity Int      @default(0)
+  unit             String?  @default("Pcs")
+  conversionFactor Float?   @default(1)
+  hasSecondaryUnit Boolean? @default(false)
+  secondaryUnit    String?
+  quantity         Float
+  baseQuantity     Float?
+  returnedQuantity Float    @default(0)
   unitPrice        Float
   discountAmount   Float    @default(0)
   taxPercent       Float    @default(0)
@@ -451,15 +490,22 @@ model BillItem {
   lineTotal        Float
 
   createdAt        DateTime @default(now())
+
+  @@index([billId])
+  @@index([productId])
+  @@index([tenantId])
 }
 
 model BillReturn {
   id                String   @id @default(uuid())
+  tenantId          String?
+  tenant            Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   billId            String
   bill              Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
   
   productId         String
-  returnQuantity    Int
+  returnQuantity    Float
   returnAmount      Float
   reason            String?
   
@@ -467,6 +513,11 @@ model BillReturn {
   processedBy       User     @relation(fields: [processedByUserId], references: [id])
 
   createdAt         DateTime @default(now())
+
+  @@index([billId])
+  @@index([productId])
+  @@index([tenantId])
+  @@index([createdAt])
 }
 
 model StockHistory {
@@ -481,11 +532,23 @@ model StockHistory {
   addedRemovedQty  Float       // Positive for addition, negative for deduction
   updatedStock     Float
   reason           StockReason
+
+  // Phase 2 Stock Ledger Audit Fields
+  movementQuantity Float?
+  movementUnit     String?
+  baseQuantity     Float?
+  baseUnit         String?
+  referenceType    String?
+  referenceId      String?
+  notes            String?
   
   updatedByUserId  String
   updatedByUser    User        @relation(fields: [updatedByUserId], references: [id])
 
   createdAt        DateTime    @default(now())
+
+  @@index([tenantId, productId])
+  @@index([tenantId, createdAt])
 }
 
 model Supplier {
@@ -522,87 +585,100 @@ model Supplier {
 }
 
 model SupplierPayment {
-  id              String        @id @default(uuid())
-  tenantId        String
-  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                String           @id @default(uuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
-  supplierId      String
-  supplier        Supplier      @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplierId        String
+  supplier          Supplier         @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   
-  amount          Float
-  paymentDate     DateTime      @default(now())
-  paymentMethod   PaymentMethod @default(CASH)
-  referenceNumber String?
-  notes           String?
+  purchaseInvoiceId String?
+  purchaseInvoice   PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id], onDelete: SetNull)
   
-  createdById     String
-  createdBy       User          @relation(fields: [createdById], references: [id])
+  amount            Float
+  paymentDate       DateTime         @default(now())
+  paymentMethod     PaymentMethod    @default(CASH)
+  referenceNumber   String?
+  notes             String?
+  
+  createdById       String
+  createdBy         User             @relation(fields: [createdById], references: [id])
 
-  createdAt       DateTime      @default(now())
+  createdAt         DateTime         @default(now())
 }
 
 model PurchaseInvoice {
-  id                    String         @id @default(uuid())
+  id                    String           @id @default(uuid())
   tenantId              String
-  tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
   supplierId            String
-  supplier              Supplier       @relation(fields: [supplierId], references: [id])
+  supplier              Supplier         @relation(fields: [supplierId], references: [id])
   
   purchaseNumber        String
   supplierInvoiceNumber String?
-  invoiceDate           DateTime       @default(now())
+  invoiceDate           DateTime         @default(now())
   dueDate               DateTime?
   paymentTerms          String?
   notes                 String?
   subtotal              Float
-  taxAmount             Float          @default(0)
-  discountAmount        Float          @default(0)
-  cgstAmount            Float          @default(0)
-  sgstAmount            Float          @default(0)
-  igstAmount            Float          @default(0)
-  otherCharges          Float          @default(0)
-  roundOff              Float          @default(0)
+  taxAmount             Float            @default(0)
+  discountAmount        Float            @default(0)
+  cgstAmount            Float            @default(0)
+  sgstAmount            Float            @default(0)
+  igstAmount            Float            @default(0)
+  otherCharges          Float            @default(0)
+  roundOff              Float            @default(0)
   totalAmount           Float
-  paidAmount            Float          @default(0)
-  dueAmount             Float          @default(0)
-  paymentStatus         BillStatus     @default(PAID)
-  purchaseStatus        PurchaseStatus @default(CONFIRMED)
+  paidAmount            Float            @default(0)
+  dueAmount             Float            @default(0)
+  paymentStatus         BillStatus       @default(PAID)
+  purchaseStatus        PurchaseStatus   @default(CONFIRMED)
 
-  purchaseType          String?        @default("Local Purchase")
-  paymentMethod         PaymentMethod  @default(CASH)
+  purchaseType          String?          @default("Local Purchase")
+  paymentMethod         PaymentMethod    @default(CASH)
   bankAccount           String?
   referenceNumber       String?
-  attachments           Json?          // Array of file URLs
+  attachments           Json?            // Array of file URLs
   
   items                 PurchaseItem[]
   returns               PurchaseReturn[]
+  payments              SupplierPayment[]
 
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
   @@unique([tenantId, purchaseNumber])
 }
 
-model PurchaseItem {
-  id                String          @id @default(uuid())
-  purchaseInvoiceId String
-  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
-  
-  productId         String
-  product           Product         @relation(fields: [productId], references: [id])
-  
-  sku               String?
-  unit              String?         @default("Nos")
-  quantity          Int
-  unitPurchasePrice Float
-  discountPercent   Float           @default(0)
-  discountAmount    Float           @default(0)
-  taxPercent        Float           @default(0)
-  taxAmount         Float           @default(0)
-  totalAmount       Float
 
-  createdAt         DateTime        @default(now())
+model PurchaseItem {
+  id                   String          @id @default(uuid())
+  purchaseInvoiceId    String
+  purchaseInvoice      PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  
+  productId            String
+  product              Product         @relation(fields: [productId], references: [id])
+  
+  sku                  String?
+  unit                 String?         @default("Nos")
+  conversionFactor     Float?          @default(1)
+  hasSecondaryUnit     Boolean?        @default(false)
+  secondaryUnit        String?
+  quantity             Float
+  baseQuantity         Float?
+  returnedQuantity     Float           @default(0)
+  returnedBaseQuantity Float           @default(0)
+  unitPurchasePrice    Float
+  baseUnitPrice        Float?
+
+  discountPercent      Float           @default(0)
+  discountAmount       Float           @default(0)
+  taxPercent           Float           @default(0)
+  taxAmount            Float           @default(0)
+  totalAmount          Float
+
+  createdAt            DateTime        @default(now())
 }
 
 model PurchaseReturn {
@@ -660,9 +736,13 @@ model PurchaseReturnItem {
   
   sku              String?
   unit             String?        @default("Nos")
-  purchasedQty     Int
-  returnQty        Int
+  conversionFactor Float?         @default(1)
+  purchasedQty     Float
+  returnQty        Float
+  baseQuantity     Float?
   unitPrice        Float
+  baseUnitPrice    Float?
+  taxMode          String?        @default("EXCLUSIVE")
   discountPercent  Float          @default(0)
   discountAmount   Float          @default(0)
   taxPercent       Float          @default(0)

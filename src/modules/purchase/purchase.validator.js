@@ -21,10 +21,12 @@ export const createPurchaseInvoiceSchema = z.object({
         unit: z.string().optional().default('Nos'),
         quantity: z.number({ required_error: 'Quantity is required.' })
           .positive('Quantity must be greater than zero.')
-          .or(z.string().transform(val => parseInt(val)).refine(val => !isNaN(val) && val > 0, { message: 'Quantity must be a positive integer.' })),
+          .refine(val => Number.isFinite(val), { message: 'Quantity must be a finite number.' })
+          .or(z.string().transform(val => parseFloat(val)).refine(val => Number.isFinite(val) && val > 0, { message: 'Quantity must be a positive finite number.' })),
         unitPurchasePrice: z.number({ required_error: 'Unit purchase price is required.' })
           .nonnegative('Unit purchase price cannot be negative.')
-          .or(z.string().transform(val => parseFloat(val)).refine(val => !isNaN(val) && val >= 0, { message: 'Unit purchase price must be a non-negative number.' })),
+          .refine(val => Number.isFinite(val), { message: 'Unit purchase price must be a finite number.' })
+          .or(z.string().transform(val => parseFloat(val)).refine(val => Number.isFinite(val) && val >= 0, { message: 'Unit purchase price must be a non-negative finite number.' })),
         discountPercent: z.number().nonnegative().max(100).optional().default(0),
         discountAmount: z.number().nonnegative().optional().default(0),
         taxPercent: z.number().nonnegative().max(100, 'Tax percentage cannot exceed 100%.').optional().default(0)
@@ -59,8 +61,8 @@ export const updatePurchaseInvoiceSchema = z.object({
       z.object({
         productId: z.string().trim().min(1),
         unit: z.string().optional(),
-        quantity: z.number().positive().or(z.string().transform(val => parseInt(val)).refine(val => !isNaN(val) && val > 0)),
-        unitPurchasePrice: z.number().nonnegative().or(z.string().transform(val => parseFloat(val)).refine(val => !isNaN(val) && val >= 0)),
+        quantity: z.number().positive().refine(val => Number.isFinite(val)).or(z.string().transform(val => parseFloat(val)).refine(val => Number.isFinite(val) && val > 0)),
+        unitPurchasePrice: z.number().nonnegative().refine(val => Number.isFinite(val)).or(z.string().transform(val => parseFloat(val)).refine(val => Number.isFinite(val) && val >= 0)),
         discountPercent: z.number().nonnegative().optional().default(0),
         discountAmount: z.number().nonnegative().optional().default(0),
         taxPercent: z.number().nonnegative().max(100).optional().default(0)
@@ -82,7 +84,8 @@ export const recordPurchasePaymentSchema = z.object({
   body: z.object({
     amount: z.number({ required_error: 'Payment amount is required.' })
       .positive('Payment amount must be greater than zero.')
-      .or(z.string().transform(val => parseFloat(val)).refine(val => !isNaN(val) && val > 0, { message: 'Payment amount must be a positive number.' })),
+      .refine(val => Number.isFinite(val), { message: 'Payment amount must be a finite number.' })
+      .or(z.string().transform(val => parseFloat(val)).refine(val => Number.isFinite(val) && val > 0, { message: 'Payment amount must be a positive finite number.' })),
     paymentMethod: z.string().optional().default('CASH'),
     referenceNumber: z.string().optional().nullable(),
     notes: z.string().optional().nullable()
@@ -93,13 +96,13 @@ export const processPurchaseReturnSchema = z.object({
   body: z.object({
     purchaseInvoiceId: z.string({ required_error: 'Purchase Invoice ID is required.' }).trim().min(1),
     returnType: z.enum(['PURCHASE_RETURN', 'PURCHASE_CANCELLATION']).optional().default('PURCHASE_RETURN'),
-    supplierId: z.string().optional(),
+    supplierId: z.string().optional().nullable(),
     returnDate: z.string().optional().nullable(),
     returnReason: z.string().optional().nullable(),
     referenceNotes: z.string().optional().nullable(),
-    returnAgainst: z.enum(['PARTIAL_ITEMS', 'FULL_RETURN']).optional().default('PARTIAL_ITEMS'),
+    returnAgainst: z.string().optional().default('PARTIAL_ITEMS'),
     warehouse: z.string().optional().default('Main Warehouse'),
-    refundType: z.enum(['CASH_REFUND', 'ADJUST_IN_NEXT_PURCHASE', 'BANK_TRANSFER']).optional().default('CASH_REFUND'),
+    refundType: z.string().optional().default('CASH_REFUND'),
     refundAmount: z.number().nonnegative().optional().default(0),
     paymentMethod: z.string().optional().default('CASH'),
     bankAccount: z.string().optional().nullable(),
@@ -110,10 +113,12 @@ export const processPurchaseReturnSchema = z.object({
         purchasedQty: z.number().optional(),
         returnQuantity: z.number({ required_error: 'Return quantity is required.' })
           .positive('Return quantity must be greater than zero.')
-          .or(z.string().transform(val => parseInt(val)).refine(val => !isNaN(val) && val > 0)),
+          .refine(val => Number.isFinite(val))
+          .or(z.string().transform(val => parseFloat(val)).refine(val => Number.isFinite(val) && val > 0)),
         unitPrice: z.number().nonnegative().optional(),
         discountPercent: z.number().nonnegative().optional().default(0),
-        taxPercent: z.number().nonnegative().optional().default(0)
+        taxPercent: z.number().nonnegative().optional().default(0),
+        taxMode: z.string().optional().nullable()
       })
     ).min(1, 'At least one item return quantity is required.')
   }).passthrough()

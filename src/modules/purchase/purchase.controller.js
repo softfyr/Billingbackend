@@ -21,6 +21,11 @@ export const handleGetPurchaseInvoices = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, data, 'Purchase bills list fetched successfully.');
 });
 
+export const handleGetReorderSuggestions = asyncHandler(async (req, res) => {
+  const suggestions = await purchaseService.getReorderSuggestions(req.tenantId);
+  return ApiResponse.success(res, suggestions, 'Automated purchase reorder suggestions generated successfully.');
+});
+
 export const handleExportPurchaseInvoices = asyncHandler(async (req, res) => {
   const exportData = await purchaseService.exportPurchaseInvoices(req.tenantId, req.query);
   const format = (req.query.format || 'json').toLowerCase();
@@ -135,3 +140,8 @@ export const handleDeletePurchasePayment = asyncHandler(async (req, res) => {
 });
 
 
+
+export const handleGetPublicPurchaseInvoiceDetails = asyncHandler(async (req, res) => {
+  const purchase = await purchaseService.getPublicPurchaseInvoiceDetails(req.params.id);
+  return ApiResponse.success(res, purchase, 'Public purchase bill details fetched successfully.');
+});

@@ -1,6 +1,7 @@
 import * as billService from './bill.service.js';
 import { ApiResponse } from '../../utils/apiResponse.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
+import { exportToExcel, exportToCSV } from '../../utils/export.utility.js';
 
 export const handleGenerateBill = asyncHandler(async (req, res) => {
   const bill = await billService.generateBill(req.tenantId, req.user.id, req.body);
@@ -8,19 +9,57 @@ export const handleGenerateBill = asyncHandler(async (req, res) => {
 });
 
 export const handleCancelBill = asyncHandler(async (req, res) => {
-  const cancelled = await billService.cancelBill(req.tenantId, req.user.id, req.params.id);
+  const { reason } = req.body || {};
+  const cancelled = await billService.cancelBill(req.tenantId, req.user.id, req.params.id, reason);
   return ApiResponse.success(res, cancelled, 'Bill cancelled and stock restored successfully.');
 });
 
 export const handleProcessProductReturn = asyncHandler(async (req, res) => {
-  const { returnItems } = req.body;
-  const result = await billService.processProductReturn(req.tenantId, req.user.id, req.params.id, returnItems);
+  const { returnItems, billId } = req.body || {};
+  const targetBillId = req.params.id || billId;
+  const result = await billService.processProductReturn(req.tenantId, req.user.id, targetBillId, returnItems);
   return ApiResponse.success(res, result, 'Product return processed and stock adjusted successfully.');
 });
 
+export const handleGetBillReturns = asyncHandler(async (req, res) => {
+  const returns = await billService.getBillReturns(req.tenantId, req.query);
+  return ApiResponse.success(res, returns, 'Bill returns list fetched successfully.');
+});
+
+export const handleGetBillReturnDetails = asyncHandler(async (req, res) => {
+  const returnDetail = await billService.getBillReturnDetails(req.tenantId, req.params.id);
+  return ApiResponse.success(res, returnDetail, 'Bill return details fetched successfully.');
+});
+
+export const handleExportBillReturns = asyncHandler(async (req, res) => {
+  const exportData = await billService.exportBillReturns(req.tenantId, req.query);
+  const format = (req.query.format || 'json').toLowerCase();
+
+  const columns = [
+    { header: 'Return ID', key: 'returnId', width: 22 },
+    { header: 'Return Date', key: 'returnDate', width: 14 },
+    { header: 'Invoice Number', key: 'invoiceNumber', width: 18 },
+    { header: 'Customer Name', key: 'customerName', width: 22 },
+    { header: 'Customer Mobile', key: 'customerMobile', width: 16 },
+    { header: 'Product Name', key: 'productName', width: 22 },
+    { header: 'SKU', key: 'sku', width: 14 },
+    { header: 'Return Qty', key: 'returnQuantity', width: 12 },
+    { header: 'Return Amount (₹)', key: 'returnAmount', width: 16 },
+    { header: 'Reason', key: 'reason', width: 20 },
+    { header: 'Processed By', key: 'processedBy', width: 18 }
+  ];
+
+  if (format === 'excel' || format === 'xlsx') {
+    return await exportToExcel(res, { filename: 'sales_returns', sheetName: 'Sales Returns', columns, data: exportData });
+  } else if (format === 'csv') {
+    return exportToCSV(res, { filename: 'sales_returns', columns, data: exportData });
+  }
+
+  return ApiResponse.success(res, exportData, 'Sales returns export dataset generated successfully.');
+});
+
 export const handleGetBills = asyncHandler(async (req, res) => {
-  const { status, customerId, startDate, endDate, search } = req.query;
-  const bills = await billService.getBills(req.tenantId, { status, customerId, startDate, endDate, search });
+  const bills = await billService.getBills(req.tenantId, req.query);
   return ApiResponse.success(res, bills, 'Bills list fetched successfully.');
 });
 
@@ -28,8 +67,6 @@ export const handleGetBillDetails = asyncHandler(async (req, res) => {
   const bill = await billService.getBillDetails(req.tenantId, req.params.id);
   return ApiResponse.success(res, bill, 'Bill details fetched successfully.');
 });
-
-import { exportToExcel, exportToCSV } from '../../utils/export.utility.js';
 
 export const handleExportBills = asyncHandler(async (req, res) => {
   const exportData = await billService.exportBills(req.tenantId, req.query);
@@ -39,6 +76,7 @@ export const handleExportBills = asyncHandler(async (req, res) => {
     { header: 'Invoice Number', key: 'invoiceNumber', width: 18 },
     { header: 'Customer Name', key: 'customerName', width: 22 },
     { header: 'Customer Mobile', key: 'customerMobile', width: 16 },
+    { header: 'GSTIN', key: 'gstin', width: 18 },
     { header: 'Date', key: 'date', width: 14 },
     { header: 'Subtotal (₹)', key: 'subtotal', width: 14 },
     { header: 'Tax (₹)', key: 'taxAmount', width: 14 },
@@ -61,3 +99,7 @@ export const handleExportBills = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, exportData, 'Sales bills export dataset generated successfully.');
 });
 
+export const handleGetPublicBillDetails = asyncHandler(async (req, res) => {
+  const bill = await billService.getPublicBillDetails(req.params.id);
+  return ApiResponse.success(res, bill, 'Public bill details fetched successfully.');
+});

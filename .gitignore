@@ -14,7 +14,7 @@ uploads/
 public/uploads/
 tmp/
 temp/
-scratch/*.log
+scratch/
 
 # Logs
 logs/

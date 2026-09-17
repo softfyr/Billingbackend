@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../utils/apiError.js';
+import { calculatePartyLedgerRunningBalance } from '../../utils/party.utility.js';
 
 export const createSupplier = async (tenantId, data) => {
   const {
@@ -162,8 +163,7 @@ export const getSuppliers = async (tenantId, filters = {}) => {
       totalPurchasesThisMonth,
       totalPaidThisMonth,
       totalPayableOverall
-    },
-    suppliers: formattedSuppliers
+    }
   };
 
   return formatPaginatedResult(formattedSuppliers, totalCount, page, limit, extraSummary);
@@ -268,6 +268,8 @@ export const getSupplierDetails = async (tenantId, supplierId) => {
   };
 };
 
+
+
 export const getSupplierLedger = async (tenantId, supplierId) => {
   const supplier = await prisma.supplier.findFirst({
     where: { id: supplierId, tenantId },
@@ -277,7 +279,16 @@ export const getSupplierLedger = async (tenantId, supplierId) => {
         orderBy: { invoiceDate: 'asc' }
       },
       supplierPayments: {
+        where: {
+          OR: [
+            { purchaseInvoiceId: null },
+            { purchaseInvoice: { purchaseStatus: { notIn: ['CANCELLED'] } } }
+          ]
+        },
         orderBy: { paymentDate: 'asc' }
+      },
+      purchaseReturns: {
+        orderBy: { returnDate: 'asc' }
       }
     }
   });
@@ -310,16 +321,32 @@ export const getSupplierLedger = async (tenantId, supplierId) => {
     });
   }
 
-  transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+  for (const ret of (supplier.purchaseReturns || [])) {
+    transactions.push({
+      id: ret.id,
+      date: ret.returnDate,
+      type: 'PURCHASE_RETURN',
+      referenceNumber: ret.returnNumber,
+      credit: 0,
+      debit: ret.totalReturnAmount,
+      notes: ret.referenceNotes || ret.returnReason || `Purchase Return #${ret.returnNumber}`
+    });
 
-  let runningBalance = 0;
-  const ledgerEntries = transactions.map(entry => {
-    runningBalance += (entry.credit - entry.debit);
-    return {
-      ...entry,
-      runningBalance: Math.max(0, runningBalance)
-    };
-  });
+    const refundAmt = Number(ret.refundAmount || 0);
+    if (refundAmt > 0 && ret.refundType === 'CASH_REFUND') {
+      transactions.push({
+        id: ret.id + '-cash-refund',
+        date: ret.returnDate,
+        type: 'CASH_REFUND',
+        referenceNumber: ret.returnNumber,
+        credit: refundAmt,
+        debit: 0,
+        notes: 'Cash refund received from supplier for Return #' + ret.returnNumber,
+      });
+    }
+  }
+
+  const ledgerResult = calculatePartyLedgerRunningBalance(transactions);
 
   return {
     supplier: {
@@ -330,11 +357,11 @@ export const getSupplierLedger = async (tenantId, supplierId) => {
       mobileNumber: supplier.mobileNumber
     },
     statementSummary: {
-      totalCredit: ledgerEntries.reduce((acc, curr) => acc + curr.credit, 0),
-      totalDebit: ledgerEntries.reduce((acc, curr) => acc + curr.debit, 0),
-      closingBalance: Math.max(0, runningBalance)
+      totalCredit: ledgerResult.totalCredit,
+      totalDebit: ledgerResult.totalDebit,
+      closingBalance: ledgerResult.closingBalance
     },
-    ledgerEntries
+    ledgerEntries: ledgerResult.ledgerEntries
   };
 };
 
@@ -367,8 +394,42 @@ export const recordSupplierPayment = async (tenantId, userId, supplierId, data) 
       }
     });
 
-    // 2. Update Supplier totalPaid and outstandingDue
-    const newOutstandingDue = Math.max(0, supplier.outstandingDue - paymentAmount);
+    // 2. FIFO Auto-Allocation across pending Purchase Invoices (oldest first)
+    let remainingToAllocate = paymentAmount;
+    const pendingInvoices = await tx.purchaseInvoice.findMany({
+      where: {
+        tenantId,
+        supplierId,
+        purchaseStatus: { notIn: ['CANCELLED', 'DRAFT'] },
+        dueAmount: { gt: 0 }
+      },
+      orderBy: { invoiceDate: 'asc' }
+    });
+
+    for (const inv of pendingInvoices) {
+      if (remainingToAllocate <= 0) break;
+
+      const allocAmount = Math.min(inv.dueAmount, remainingToAllocate);
+      const newPaid = Math.round((inv.paidAmount + allocAmount) * 100) / 100;
+      const newDue = Math.max(0, Math.round((inv.totalAmount - newPaid) * 100) / 100);
+
+      let newStatus = 'PAID';
+      if (newDue > 0) newStatus = 'PARTIALLY_PAID';
+
+      await tx.purchaseInvoice.update({
+        where: { id: inv.id },
+        data: {
+          paidAmount: newPaid,
+          dueAmount: newDue,
+          paymentStatus: newStatus
+        }
+      });
+
+      remainingToAllocate = Math.round((remainingToAllocate - allocAmount) * 100) / 100;
+    }
+
+    // 3. Update Supplier totalPaid and outstandingDue
+    const newOutstandingDue = Math.max(0, Math.round((supplier.outstandingDue - paymentAmount) * 100) / 100);
     const updatedSupplier = await tx.supplier.update({
       where: { id: supplierId },
       data: {

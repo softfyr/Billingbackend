@@ -7,7 +7,7 @@ if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-jwt-key-softfyr-billing-saas';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || (JWT_SECRET + '-refresh-secret-key');
 
-const ACCESS_TOKEN_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || '1d';
+const ACCESS_TOKEN_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || process.env.JWT_EXPIRES_IN || '1d';
 const REFRESH_TOKEN_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
 
 /**
@@ -33,7 +33,9 @@ export const generateAuthTokens = (payload = {}) => {
 
   return {
     accessToken,
-    refreshToken
+    refreshToken,
+    token: accessToken, // Backward-compatibility alias for single-token clients
+    jwt: accessToken   // Compatibility alias for frontends reading res.data.jwt
   };
 };
 

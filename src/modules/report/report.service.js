@@ -29,7 +29,13 @@ export const getSalesReport = async (tenantId, filters = {}) => {
   if (paymentMethod) where.paymentMethod = paymentMethod;
   if (paymentStatus) where.status = paymentStatus;
   if (search) {
-    where.invoiceNumber = { contains: search, mode: 'insensitive' };
+    where.OR = [
+      { invoiceNumber: { contains: search, mode: 'insensitive' } },
+      { businessName: { contains: search, mode: 'insensitive' } },
+      { contactPerson: { contains: search, mode: 'insensitive' } },
+      { gstin: { contains: search, mode: 'insensitive' } },
+      { customer: { name: { contains: search, mode: 'insensitive' } } }
+    ];
   }
 
   if (categoryId || subCategoryId || productId) {
@@ -108,7 +114,7 @@ export const generateSalesReportPDF = async (tenantId, filters, res) => {
 
   const data = reportData.bills.map(b => ({
     invoiceNumber: b.invoiceNumber,
-    customerName: b.customer ? b.customer.name : 'N/A',
+    customerName: b.businessName || b.contactPerson || (b.customer ? b.customer.name : 'N/A'),
     date: b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '',
     status: b.status,
     grandTotal: b.grandTotal
@@ -144,7 +150,7 @@ export const generateSalesReportExcel = async (tenantId, filters, res) => {
   const data = reportData.bills.map(b => ({
     invoiceNumber: b.invoiceNumber,
     createdAt: new Date(b.createdAt).toLocaleDateString(),
-    customerName: b.customer ? b.customer.name : 'N/A',
+    customerName: b.businessName || b.contactPerson || (b.customer ? b.customer.name : 'N/A'),
     paymentMethod: b.paymentMethod,
     status: b.status,
     subtotal: b.subtotal,

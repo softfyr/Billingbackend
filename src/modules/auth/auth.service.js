@@ -151,6 +151,8 @@ export const verifyLoginOTP = async (data) => {
       message: 'Mobile OTP verified. Vendor registered. Please create your business store profile to proceed.',
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
+      token: tokens.accessToken,
+      jwt: tokens.accessToken,
       role: 'vendor',
       isExistingUser: false,
       hasSelectedPackage: false,
@@ -241,6 +243,8 @@ export const verifyLoginOTP = async (data) => {
   return formatUserResponse(user, user.tenant, {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
+    token: tokens.accessToken,
+    jwt: tokens.accessToken,
     role: roleName,
     redirectUrl,
     isExistingUser: true,
@@ -299,6 +303,8 @@ export const adminLogin = async (data) => {
     message: 'Admin credentials verified. Login granted.',
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
+    token: tokens.accessToken,
+    jwt: tokens.accessToken,
     role: 'admin',
     redirectUrl: '/admin/dashboard',
     user: {
@@ -365,7 +371,9 @@ export const refreshAccessToken = async (data = {}) => {
     success: true,
     message: 'Access token refreshed successfully.',
     accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken
+    refreshToken: tokens.refreshToken,
+    token: tokens.accessToken,
+    jwt: tokens.accessToken
   };
 };
 

@@ -11,11 +11,14 @@ import {
 
 const router = Router();
 
+router.get('/public/:id', purchaseController.handleGetPublicPurchaseInvoiceDetails);
+
 router.use(authenticateToken);
 
 router.post('/', requireRole(['TENANT_ADMIN']), validate(createPurchaseInvoiceSchema), purchaseController.handleCreatePurchaseInvoice);
 router.get('/', purchaseController.handleGetPurchaseInvoices);
 router.get('/export', purchaseController.handleExportPurchaseInvoices);
+router.get('/reorder-suggestions', purchaseController.handleGetReorderSuggestions);
 
 // Purchase Return Routes
 router.post('/returns', requireRole(['TENANT_ADMIN']), validate(processPurchaseReturnSchema), purchaseController.handleCreatePurchaseReturn);

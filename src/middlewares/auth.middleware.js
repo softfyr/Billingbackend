@@ -1,22 +1,58 @@
 import { prisma } from '../config/prisma.js';
 import { ApiError } from '../utils/apiError.js';
-import { verifyAuthToken } from '../utils/auth.util.js';
+import { verifyAuthToken, verifyRefreshToken } from '../utils/auth.util.js';
 import { tokenBlacklist } from '../services/tokenBlacklist.service.js';
 
 export const authenticateToken = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    let token = null;
 
-    if (!token) {
-      throw new ApiError(401, 'Authentication token is missing or invalid.');
+    if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else if (req.headers['x-access-token']) {
+      token = req.headers['x-access-token'];
+    } else if (req.cookies && (req.cookies.accessToken || req.cookies.token)) {
+      token = req.cookies.accessToken || req.cookies.token;
+    } else if (req.headers.cookie) {
+      const parsedCookies = Object.fromEntries(
+        req.headers.cookie.split(';').map(c => {
+          const [key, ...val] = c.trim().split('=');
+          return [key, val.join('=')];
+        })
+      );
+      token = parsedCookies.accessToken || parsedCookies.token || null;
+    } else if (req.query && req.query.token) {
+      token = req.query.token;
+    }
+
+    if (!token || token === 'undefined' || token === 'null' || token === '[object Object]') {
+      throw new ApiError(401, 'Authentication token is missing or invalid. Please log in again.');
     }
 
     if (tokenBlacklist.isRevoked(token)) {
       throw new ApiError(401, 'Token has been revoked due to logout. Please log in again.');
     }
 
-    const decoded = verifyAuthToken(token);
+    let decoded;
+    try {
+      decoded = verifyAuthToken(token);
+    } catch (jwtErr) {
+      // Check if client accidentally sent a Refresh Token in Authorization header
+      try {
+        const refreshDecoded = verifyRefreshToken(token);
+        if (refreshDecoded && refreshDecoded.tokenType === 'REFRESH') {
+          return next(new ApiError(401, 'Refresh token provided where Access token is expected. Please use your accessToken in the Authorization header or request a new token via POST /auth/refresh-token.'));
+        }
+      } catch (refErr) {
+        // Ignored: Not a valid refresh token either
+      }
+      throw jwtErr;
+    }
+
+    if (!decoded || !decoded.userId) {
+      throw new ApiError(401, 'Invalid authentication token payload. Please log in again.');
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
@@ -46,8 +82,12 @@ export const authenticateToken = async (req, res, next) => {
 
     next();
   } catch (error) {
-    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-      next(new ApiError(401, 'Invalid or expired token. Please log in again.'));
+    if (error instanceof ApiError) {
+      next(error);
+    } else if (error.name === 'TokenExpiredError') {
+      next(new ApiError(401, 'Access token has expired. Please refresh your token or log in again.'));
+    } else if (error.name === 'JsonWebTokenError') {
+      next(new ApiError(401, 'Invalid authentication token. Please log in again.'));
     } else {
       next(error);
     }
@@ -72,9 +112,9 @@ export const requireRole = (roles = []) => {
 
 export const enforceEmployeeRestrictions = (req, res, next) => {
   if (req.user && req.user.role === 'EMPLOYEE') {
-    // Restricted actions: DELETE operations, administrative modifications
-    if (req.method === 'DELETE') {
-      return next(new ApiError(403, 'Employees are not authorized to delete records.'));
+    // Restricted actions: DELETE operations, administrative cancellations
+    if (req.method === 'DELETE' || req.originalUrl.includes('/cancel') || req.path.includes('/cancel')) {
+      return next(new ApiError(403, 'Employees are not authorized to cancel or delete records.'));
     }
   }
   next();

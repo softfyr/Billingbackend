@@ -3,25 +3,40 @@ import { ApiResponse } from '../../utils/apiResponse.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 
 export const handleFindOrCreateCustomer = asyncHandler(async (req, res) => {
-  const { mobileNumber, name, email, address, city, state, pincode } = req.body;
+  const { mobileNumber, name, ...additionalInfo } = req.body;
+  const customerName = name || req.body.businessName || req.body.contactPerson;
   const result = await customerService.findOrCreateCustomerByMobile(
     req.tenantId,
     mobileNumber,
-    name,
-    { email, address, city, state, pincode }
+    customerName,
+    additionalInfo
   );
   return ApiResponse.success(res, result, 'Customer lookup successful.');
 });
 
 export const handleGetCustomers = asyncHandler(async (req, res) => {
-  const { search } = req.query;
-  const customers = await customerService.getCustomers(req.tenantId, search);
+  const customers = await customerService.getCustomers(req.tenantId, req.query);
   return ApiResponse.success(res, customers, 'Customer list fetched successfully.');
 });
 
 export const handleGetCustomerDetails = asyncHandler(async (req, res) => {
-  const details = await customerService.getCustomerDetails(req.tenantId, req.params.id);
+  const details = await customerService.getCustomerDetails(req.tenantId, req.params.id, req.query);
   return ApiResponse.success(res, details, 'Customer details fetched successfully.');
+});
+
+export const handleGetCustomerBills = asyncHandler(async (req, res) => {
+  const bills = await customerService.getCustomerBills(req.tenantId, req.params.id, req.query);
+  return ApiResponse.success(res, bills, 'Customer bills fetched successfully.');
+});
+
+export const handleGetCustomerPurchasedProducts = asyncHandler(async (req, res) => {
+  const products = await customerService.getCustomerPurchasedProducts(req.tenantId, req.params.id, req.query);
+  return ApiResponse.success(res, products, 'Customer purchased products fetched successfully.');
+});
+
+export const handleGetCustomerLedger = asyncHandler(async (req, res) => {
+  const ledger = await customerService.getCustomerLedger(req.tenantId, req.params.id);
+  return ApiResponse.success(res, ledger, 'Customer ledger statement fetched successfully.');
 });
 
 export const handleUpdateCustomer = asyncHandler(async (req, res) => {
@@ -42,10 +57,13 @@ export const handleExportCustomers = asyncHandler(async (req, res) => {
 
   const columns = [
     { header: 'Customer Name', key: 'name', width: 22 },
+    { header: 'Business Name', key: 'businessName', width: 22 },
     { header: 'Mobile Number', key: 'mobileNumber', width: 16 },
+    { header: 'Customer Type', key: 'customerType', width: 14 },
     { header: 'Email', key: 'email', width: 22 },
     { header: 'City', key: 'city', width: 15 },
     { header: 'State', key: 'state', width: 15 },
+    { header: 'GSTIN', key: 'gstin', width: 18 },
     { header: 'Total Invoices', key: 'totalInvoices', width: 14 },
     { header: 'Total Purchased (₹)', key: 'totalPurchaseAmount', width: 18 },
     { header: 'Total Paid (₹)', key: 'totalPaidAmount', width: 16 },

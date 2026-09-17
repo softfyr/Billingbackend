@@ -54,6 +54,8 @@ export const createProductSchema = z.object({
     openingStock: preprocessNumber(z.number().nonnegative()).optional().default(0),
     maxStockLevel: preprocessNumber(z.number().nonnegative()).optional().default(0),
     minStockLevel: preprocessNumber(z.number().nonnegative()).optional().default(5),
+    reorderLevel: preprocessNumber(z.number().nonnegative()).optional().default(10),
+    reorderQuantity: preprocessNumber(z.number().nonnegative()).optional().default(50),
     stockAlertQuantity: preprocessNumber(z.number().nonnegative()).optional().default(5),
     enableStockAlert: preprocessBoolean.default(true),
     productImage: z.any().optional().nullable(),
@@ -90,6 +92,8 @@ export const createProductSchema = z.object({
 
 export const updateProductSchema = z.object({
   body: z.object({
+    categoryId: z.string().uuid().optional(),
+    subCategoryId: z.string().uuid().optional(),
     name: z.string().min(2).optional(),
     sku: z.string().optional().nullable(),
     hsnCode: z.string().min(2).optional().nullable(),
@@ -109,6 +113,8 @@ export const updateProductSchema = z.object({
     taxId: z.string().uuid().optional().nullable().or(z.literal('')),
     maxStockLevel: preprocessNumber(z.number().nonnegative()).optional(),
     minStockLevel: preprocessNumber(z.number().nonnegative()).optional(),
+    reorderLevel: preprocessNumber(z.number().nonnegative()).optional(),
+    reorderQuantity: preprocessNumber(z.number().nonnegative()).optional(),
     stockAlertQuantity: preprocessNumber(z.number().nonnegative()).optional(),
     enableStockAlert: preprocessBoolean,
     productImage: z.any().optional().nullable(),

@@ -34,14 +34,22 @@ export const handleGetLowStockProducts = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, products, 'Low stock products fetched successfully.');
 });
 
-export const handleGetProductByBarcode = asyncHandler(async (req, res) => {
-  const product = await productService.getProductByBarcode(req.tenantId, req.params.barcode);
-  return ApiResponse.success(res, product, 'Product fetched by barcode successfully.');
+export const handleGetProductBySku = asyncHandler(async (req, res) => {
+  const code = req.params.sku || req.params.barcode;
+  const product = await productService.getProductBySku(req.tenantId, code);
+  return ApiResponse.success(res, product, 'Product fetched by SKU successfully.');
 });
+
+export const handleGetProductByBarcode = handleGetProductBySku;
 
 export const handleGetProductDetails = asyncHandler(async (req, res) => {
   const product = await productService.getProductDetails(req.tenantId, req.params.id);
   return ApiResponse.success(res, product, 'Product details fetched successfully.');
+});
+
+export const handleGetProductStockHistory = asyncHandler(async (req, res) => {
+  const history = await productService.getProductStockHistory(req.tenantId, req.params.id, req.query);
+  return ApiResponse.success(res, history, 'Product stock movement history fetched successfully.');
 });
 
 export const handleUpdateProduct = asyncHandler(async (req, res) => {
@@ -98,5 +106,3 @@ export const handleExportProducts = asyncHandler(async (req, res) => {
     data: exportData
   });
 });
-
-

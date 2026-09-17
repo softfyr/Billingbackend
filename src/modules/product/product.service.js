@@ -1,10 +1,19 @@
+import { prisma } from '../../config/prisma.js';
+import { ApiError } from '../../utils/apiError.js';
+import { getPaginationParams, formatPaginatedResult } from '../../utils/pagination.utility.js';
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
+import { parseBoolean } from '../../utils/boolean.utility.js';
+import { recordStockMovement } from '../../services/stockMovement.service.js';
+
+
 export const formatSingleProduct = (product) => {
   if (!product) return null;
   const rawType = (product.taxType || '').toUpperCase();
   const isInc = ['INCLUSIVE', 'GST_INCLUSIVE'].includes(rawType);
   const taxMode = isInc ? 'INCLUSIVE' : 'EXCLUSIVE';
-  const taxPct = product.tax?.percentage ?? (rawType === 'EXEMPT' || rawType === 'NON_GST' ? 0 : 18);
-  
+  const isExempt = ['EXEMPT', 'NON_GST'].includes(rawType);
+  const taxPct = isExempt ? 0 : (product.tax?.percentage ?? (product.taxPercent ?? 0));
+
   const factor = (product.hasSecondaryUnit && product.conversionFactor > 1) ? product.conversionFactor : 1;
   const perPieceCost = (product.hasSecondaryUnit && product.secondaryPurchasePrice && factor > 1) 
     ? (product.secondaryPurchasePrice / factor) 
@@ -12,7 +21,7 @@ export const formatSingleProduct = (product) => {
 
   return {
     ...product,
-    taxType: ['EXEMPT', 'NON_GST'].includes(rawType) ? rawType : 'GST',
+    taxType: isExempt ? rawType : 'GST',
     taxMode: taxMode,
     taxPercent: taxPct,
     taxRate: taxPct,
@@ -20,20 +29,27 @@ export const formatSingleProduct = (product) => {
   };
 };
 
-
-const resolveTaxId = async (tenantId, taxId, taxPercent, taxType) => {
-  if (taxId) return taxId;
+const resolveTaxId = async (tenantId, taxId, taxPercent, taxType, tx = prisma) => {
   const rawType = (taxType || '').toUpperCase();
-  if (rawType === 'EXEMPT' || rawType === 'NON_GST') {
-    taxPercent = 0;
+  if (['EXEMPT', 'NON_GST'].includes(rawType)) {
+    return null;
   }
-  if (taxPercent !== undefined && taxPercent !== null) {
+  if (taxId) {
+    const existingTax = await tx.tax.findFirst({
+      where: { id: taxId, tenantId, status: 'ACTIVE' }
+    });
+    if (!existingTax) {
+      throw new ApiError(400, 'Invalid tax selected for this tenant.');
+    }
+    return existingTax.id;
+  }
+  if (taxPercent !== undefined && taxPercent !== null && taxPercent !== '') {
     const pct = parseFloat(taxPercent) || 0;
-    let taxRecord = await prisma.tax.findFirst({
+    let taxRecord = await tx.tax.findFirst({
       where: { tenantId, percentage: pct, status: 'ACTIVE' }
     });
     if (!taxRecord) {
-      taxRecord = await prisma.tax.create({
+      taxRecord = await tx.tax.create({
         data: { tenantId, name: `${pct}% GST`, percentage: pct, status: 'ACTIVE' }
       });
     }
@@ -41,11 +57,6 @@ const resolveTaxId = async (tenantId, taxId, taxPercent, taxType) => {
   }
   return null;
 };
-
-import { prisma } from '../../config/prisma.js';
-import { ApiError } from '../../utils/apiError.js';
-import { getPaginationParams, formatPaginatedResult } from '../../utils/pagination.utility.js';
-import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
 
 export const getCategories = async () => {
   return await prisma.category.findMany({
@@ -92,6 +103,8 @@ export const createProduct = async (tenantId, userId, data) => {
     openingStock = 0,
     maxStockLevel = 0,
     minStockLevel = 5,
+    reorderLevel = 10,
+    reorderQuantity = 50,
     stockAlertQuantity = 5,
     enableStockAlert = true,
     productImage,
@@ -104,19 +117,22 @@ export const createProduct = async (tenantId, userId, data) => {
   if (!name || !name.trim()) throw new ApiError(400, 'Product Name is required.');
   if (!categoryId || !subCategoryId) throw new ApiError(400, 'Category and Sub-Category are required.');
   if (!hsnCode || !hsnCode.trim()) throw new ApiError(400, 'HSN Code is required.');
-  if (sellingPrice === undefined || sellingPrice <= 0) throw new ApiError(400, 'Valid Selling Price is required.');
+  if (sellingPrice === undefined || sellingPrice === null || parseFloat(sellingPrice) <= 0) {
+    throw new ApiError(400, 'Valid Selling Price is required.');
+  }
 
   const category = await prisma.category.findUnique({ where: { id: categoryId } });
   if (!category) throw new ApiError(404, 'Category not found.');
 
+  // Category -> SubCategory strict ownership check
   const subCategory = await prisma.subCategory.findFirst({
     where: { id: subCategoryId, categoryId },
     include: { additionalFields: true }
   });
-  if (!subCategory) throw new ApiError(404, 'Sub-Category not found under specified Category.');
+  if (!subCategory) throw new ApiError(400, 'Selected Sub-Category does not belong to the specified Category.');
 
   // Multi-unit validation & per-piece purchase price calculation
-  const isMultiUnit = Boolean(hasSecondaryUnit);
+  const isMultiUnit = parseBoolean(hasSecondaryUnit);
   let parsedConversion = parseFloat(conversionFactor) || 1;
   let parsedSecPrice = secondaryPurchasePrice ? parseFloat(secondaryPurchasePrice) : null;
   let finalPurchasePrice = purchasePrice ? parseFloat(purchasePrice) : 0;
@@ -131,38 +147,34 @@ export const createProduct = async (tenantId, userId, data) => {
     if (!parsedSecPrice || parsedSecPrice <= 0) {
       throw new ApiError(400, 'Secondary purchase price must be greater than 0.');
     }
-    // Calculate base unit purchase cost: Secondary Purchase Price / Conversion Factor
     if (finalPurchasePrice <= 0) {
       finalPurchasePrice = Math.round((parsedSecPrice / parsedConversion) * 100) / 100;
     }
   }
 
-  // Parse additionalValues if sent as string (e.g. from multipart form-data)
+  // Parse & validate required custom fields
   let parsedAdditionalValues = additionalValues;
   if (typeof parsedAdditionalValues === 'string') {
     try { parsedAdditionalValues = JSON.parse(parsedAdditionalValues); } catch (e) { parsedAdditionalValues = {}; }
   }
 
-  // Validate required custom fields
-  if (subCategory.additionalFields.length > 0) {
+  if (subCategory.additionalFields && subCategory.additionalFields.length > 0) {
     for (const field of subCategory.additionalFields) {
-      if (field.isRequired && (!parsedAdditionalValues || !parsedAdditionalValues[field.labelName])) {
+      if (field.isRequired && (!parsedAdditionalValues || parsedAdditionalValues[field.labelName] === undefined || parsedAdditionalValues[field.labelName] === null || String(parsedAdditionalValues[field.labelName]).trim() === '')) {
         throw new ApiError(400, `The field '${field.labelName}' is required for this Sub-Category.`);
       }
     }
   }
 
-  // Validate expiry date if required by Sub-Category
   if (subCategory.enableExpiryDate && (!expiryDate || !expiryDate.toString().trim())) {
     throw new ApiError(400, 'Expiry date is required for products under this Sub-Category.');
   }
 
-  // Rule 3: SKU Normalization (UPPERCASE & Trimmed)
+  // SKU Normalization (UPPERCASE & Trimmed) & Unique Check
   const normalizedSku = sku && sku.trim() ? sku.trim().toUpperCase() : `SKU-${Date.now()}`;
   
-  // Check SKU uniqueness per tenant
   const existingSKU = await prisma.product.findFirst({ where: { tenantId, sku: normalizedSku, status: 'ACTIVE' } });
-  if (existingSKU) throw new ApiError(400, `A product with SKU '${normalizedSku}' already exists in your store.`);
+  if (existingSKU) throw new ApiError(409, `A product with SKU '${normalizedSku}' already exists in your store.`);
 
   const initialStock = (openingStock !== undefined && openingStock !== null && openingStock !== '') ? parseFloat(openingStock) : 0;
 
@@ -178,7 +190,7 @@ export const createProduct = async (tenantId, userId, data) => {
   try {
     return await prisma.$transaction(async (tx) => {
       const resolvedTaxType = taxType === 'EXEMPT' || taxType === 'NON_GST' ? taxType : (taxMode === 'INCLUSIVE' ? 'INCLUSIVE' : 'GST');
-      const resolvedTaxId = await resolveTaxId(tenantId, taxId, taxPercent, resolvedTaxType);
+      const resolvedTaxId = await resolveTaxId(tenantId, taxId, taxPercent, resolvedTaxType, tx);
 
       const product = await tx.product.create({
         data: {
@@ -201,11 +213,13 @@ export const createProduct = async (tenantId, userId, data) => {
           discountPercent: discountPercent ? parseFloat(discountPercent) : 0,
           taxId: resolvedTaxId,
           openingStock: initialStock,
-          currentStock: initialStock,
+          currentStock: 0,
           maxStockLevel: maxStockLevel ? parseFloat(maxStockLevel) : 0,
           minStockLevel: minStockLevel ? parseFloat(minStockLevel) : 5,
+          reorderLevel: reorderLevel !== undefined && reorderLevel !== null ? parseFloat(reorderLevel) : 10,
+          reorderQuantity: reorderQuantity !== undefined && reorderQuantity !== null ? parseFloat(reorderQuantity) : 50,
           stockAlertQuantity: stockAlertQuantity ? parseFloat(stockAlertQuantity) : 5,
-          enableStockAlert: enableStockAlert !== undefined ? Boolean(enableStockAlert) : true,
+          enableStockAlert: parseBoolean(enableStockAlert, true),
           productImage: uploadedImageUrl,
           description: description || null,
           expiryDate: subCategory.enableExpiryDate && expiryDate ? new Date(expiryDate) : null,
@@ -215,48 +229,54 @@ export const createProduct = async (tenantId, userId, data) => {
         include: { category: true, subCategory: true, tax: true }
       });
 
-      // Record initial stock in StockHistory with reason 'OPENING_STOCK' if openingStock > 0
+      let finalProduct = product;
+
       if (initialStock > 0) {
-        await tx.stockHistory.create({
-          data: {
-            tenantId,
-            productId: product.id,
-            previousStock: 0,
-            addedRemovedQty: initialStock,
-            updatedStock: initialStock,
-            reason: 'OPENING_STOCK',
-            updatedByUserId: userId
-          }
+        const movement = await recordStockMovement(tx, {
+          tenantId,
+          userId,
+          productId: product.id,
+          quantity: initialStock,
+          direction: 'IN',
+          reason: 'OPENING_STOCK',
+          referenceType: 'PRODUCT_INIT',
+          referenceId: product.id,
+          notes: `Initial Opening Stock for ${product.name}`
         });
+        finalProduct = {
+          ...product,
+          currentStock: movement.product.currentStock
+        };
       }
 
-      return formatSingleProduct(product);
+      return formatSingleProduct(finalProduct);
+
     });
   } catch (error) {
-    // Cloudinary Cleanup on Transaction Failure
+    // Failed Image Upload Cleanup: If DB transaction fails, clean up uploaded Cloudinary image
     if (uploadedImageUrl) {
       await deleteFromCloudinary(uploadedImageUrl).catch(() => {});
+    }
+    if (error?.code === 'P2002') {
+      throw new ApiError(409, `Product with SKU '${normalizedSku}' already exists in your store.`);
     }
     throw error;
   }
 };
 
+// High-Performance DB Aggregations & Actual Monetary totalStockValue Calculation
 export const getProducts = async (tenantId, filters = {}) => {
   const { categoryId, subCategoryId, brand, status, search } = filters;
   const { page, limit, skip, take } = getPaginationParams(filters, 10);
 
   const where = { tenantId };
-
-  // Status Filter mapping
-  const sUpper = (status || 'ACTIVE').toUpperCase();
+  const sUpper = status ? String(status).toUpperCase() : 'ALL';
   const now = new Date();
 
   if (sUpper === 'ACTIVE') {
     where.status = 'ACTIVE';
-  } else if (sUpper === 'INACTIVE') {
+  } else if (sUpper === 'INACTIVE' || sUpper === 'DRAFT' || sUpper === 'SUSPENDED') {
     where.status = 'SUSPENDED';
-  } else if (sUpper === 'DRAFT') {
-    where.status = 'DRAFT';
   } else if (sUpper === 'LOW_STOCK') {
     where.status = 'ACTIVE';
     where.currentStock = { gt: 0, lte: 5 };
@@ -282,31 +302,27 @@ export const getProducts = async (tenantId, filters = {}) => {
     ];
   }
 
-  // --- Top Summary KPI Banner Aggregations ---
-  const totalProductsCount = await prisma.product.count({ where: { tenantId, status: 'ACTIVE' } });
-  
-  const allActiveProducts = await prisma.product.findMany({
-    where: { tenantId, status: 'ACTIVE' },
-    select: { currentStock: true, minStockLevel: true, purchasePrice: true }
-  });
+  // Optimized DB Aggregations & Monetary Stock Valuation
+  const [totalProductsCount, outOfStockCount, activeProductsForKPI, totalCount] = await Promise.all([
+    prisma.product.count({ where: { tenantId } }),
+    prisma.product.count({ where: { tenantId, status: 'ACTIVE', currentStock: { lte: 0 } } }),
+    prisma.product.findMany({
+      where: { tenantId, status: 'ACTIVE', currentStock: { gt: 0 } },
+      select: { currentStock: true, minStockLevel: true, purchasePrice: true }
+    }),
+    prisma.product.count({ where })
+  ]);
 
   let lowStockCount = 0;
-  let outOfStockCount = 0;
   let totalStockValue = 0;
-
-  for (let i = 0; i < allActiveProducts.length; i++) {
-    const p = allActiveProducts[i];
-    if (p.currentStock <= 0) {
-      outOfStockCount++;
-    } else if (p.currentStock <= p.minStockLevel) {
+  for (let i = 0; i < activeProductsForKPI.length; i++) {
+    const p = activeProductsForKPI[i];
+    if (p.currentStock <= p.minStockLevel) {
       lowStockCount++;
     }
-    if (p.currentStock > 0) {
-      totalStockValue += (p.currentStock * p.purchasePrice);
-    }
+    totalStockValue += (p.currentStock * p.purchasePrice);
   }
-
-  const totalCount = await prisma.product.count({ where });
+  totalStockValue = Math.round(totalStockValue * 100) / 100;
 
   const products = await prisma.product.findMany({
     where,
@@ -346,8 +362,8 @@ export const getProducts = async (tenantId, filters = {}) => {
       discountPercent: p.discountPercent || 0,
       tax: p.tax,
       taxMode: ['INCLUSIVE', 'GST_INCLUSIVE'].includes((p.taxType || '').toUpperCase()) ? 'INCLUSIVE' : (['EXCLUSIVE', 'GST_EXCLUSIVE'].includes((p.taxType || '').toUpperCase()) ? 'EXCLUSIVE' : (p.taxType || 'INCLUSIVE')),
-      taxPercent: p.tax?.percentage ?? (p.taxType === 'EXEMPT' || p.taxType === 'NON_GST' ? 0 : 18),
-      taxRate: p.tax?.percentage ?? (p.taxType === 'EXEMPT' || p.taxType === 'NON_GST' ? 0 : 18),
+      taxPercent: p.tax?.percentage ?? (['EXEMPT', 'NON_GST'].includes(p.taxType) ? 0 : (p.taxPercent ?? 0)),
+      taxRate: p.tax?.percentage ?? (['EXEMPT', 'NON_GST'].includes(p.taxType) ? 0 : (p.taxPercent ?? 0)),
       openingStock: p.openingStock,
       currentStock: p.currentStock,
       maxStockLevel: p.maxStockLevel,
@@ -384,32 +400,37 @@ export const getLowStockProducts = async (tenantId) => {
     orderBy: { currentStock: 'asc' }
   });
 
-  return products.filter(p => p.currentStock <= p.minStockLevel);
+  return products.filter(p => p.currentStock > 0 && p.currentStock <= p.minStockLevel);
 };
 
-export const getProductByBarcode = async (tenantId, barcode) => {
-  if (!barcode || !barcode.trim()) throw new ApiError(400, 'Barcode or SKU code is required.');
+// Search product by SKU code
+export const getProductBySku = async (tenantId, code) => {
+  if (!code || !code.trim()) throw new ApiError(400, 'SKU code is required.');
 
-  const cleanCode = barcode.trim();
+  const cleanCode = code.trim();
 
   const product = await prisma.product.findFirst({
     where: {
       tenantId,
       status: 'ACTIVE',
       OR: [
-        { sku: cleanCode }
+        { sku: { equals: cleanCode, mode: 'insensitive' } }
       ]
     },
     include: { category: true, subCategory: true, tax: true }
   });
 
   if (!product) {
-    throw new ApiError(404, `No product found matching Barcode / SKU '${cleanCode}'.`);
+    throw new ApiError(404, `No product found matching SKU '${cleanCode}'.`);
   }
 
   return formatSingleProduct(product);
 };
 
+export const getProductByBarcodeOrSku = getProductBySku;
+export const getProductByBarcode = getProductBySku;
+
+// Paginated Stock History Sub-route & Limited Top 10 in Details
 export const getProductDetails = async (tenantId, productId) => {
   const product = await prisma.product.findFirst({
     where: { id: productId, tenantId },
@@ -418,6 +439,7 @@ export const getProductDetails = async (tenantId, productId) => {
       subCategory: { include: { additionalFields: true } },
       tax: true,
       stockHistory: {
+        take: 10,
         include: { updatedByUser: { select: { id: true, name: true, role: true } } },
         orderBy: { createdAt: 'desc' }
       },
@@ -433,6 +455,25 @@ export const getProductDetails = async (tenantId, productId) => {
   return formatSingleProduct(product);
 };
 
+export const getProductStockHistory = async (tenantId, productId, filters = {}) => {
+  const product = await prisma.product.findFirst({ where: { id: productId, tenantId } });
+  if (!product) throw new ApiError(404, 'Product not found.');
+
+  const { page, limit, skip, take } = getPaginationParams(filters, 10);
+  const totalCount = await prisma.stockHistory.count({ where: { productId, tenantId } });
+
+  const history = await prisma.stockHistory.findMany({
+    where: { productId, tenantId },
+    skip,
+    take,
+    include: { updatedByUser: { select: { id: true, name: true, role: true } } },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  return formatPaginatedResult(history, totalCount, page, limit);
+};
+
+// Update Final-State Validation (Category, SubCategory, Custom Fields, Expiry) & Tax Consistency & Image Cleanup
 export const updateProduct = async (tenantId, productId, data = {}) => {
   let bodyData = data;
   if (typeof bodyData === 'string') {
@@ -442,23 +483,28 @@ export const updateProduct = async (tenantId, productId, data = {}) => {
   const product = await prisma.product.findFirst({ where: { id: productId, tenantId } });
   if (!product) throw new ApiError(404, 'Product not found.');
 
-  // Rule 3: SKU Normalization & Duplicate check if changed
+  // Strict HSN Validation on Update
+  if (bodyData.hsnCode !== undefined && (!bodyData.hsnCode || !String(bodyData.hsnCode).trim())) {
+    throw new ApiError(400, 'HSN Code cannot be empty.');
+  }
+
+  // SKU Normalization & Duplicate check if changed
   const normalizedSku = bodyData.sku !== undefined ? (bodyData.sku ? bodyData.sku.trim().toUpperCase() : null) : product.sku;
   if (normalizedSku && normalizedSku !== product.sku) {
     const existingSKU = await prisma.product.findFirst({
       where: { tenantId, sku: normalizedSku, status: 'ACTIVE', NOT: { id: productId } }
     });
-    if (existingSKU) throw new ApiError(400, `A product with SKU '${normalizedSku}' already exists in your store.`);
+    if (existingSKU) throw new ApiError(409, `A product with SKU '${normalizedSku}' already exists in your store.`);
   }
 
-  // Rule 1: Compute Merged Final-State for Multi-Unit and Unit parameters
-  const mergedHasSecondaryUnit = bodyData.hasSecondaryUnit !== undefined ? Boolean(bodyData.hasSecondaryUnit) : product.hasSecondaryUnit;
+  // Compute Merged Final-State for Multi-Unit parameters
+  const mergedHasSecondaryUnit = bodyData.hasSecondaryUnit !== undefined ? parseBoolean(bodyData.hasSecondaryUnit) : product.hasSecondaryUnit;
   const mergedUnit = bodyData.unit !== undefined ? (bodyData.unit ? bodyData.unit.trim() : 'Pcs') : product.unit;
   const mergedSecondaryUnit = bodyData.secondaryUnit !== undefined ? (bodyData.secondaryUnit ? bodyData.secondaryUnit.trim() : null) : product.secondaryUnit;
   const mergedConversionFactor = bodyData.conversionFactor !== undefined ? parseFloat(bodyData.conversionFactor) : product.conversionFactor;
   const mergedSecondaryPurchasePrice = bodyData.secondaryPurchasePrice !== undefined ? (bodyData.secondaryPurchasePrice ? parseFloat(bodyData.secondaryPurchasePrice) : null) : product.secondaryPurchasePrice;
 
-  // Rule 2: Unit / Conversion Factor change protection if transactions exist
+  // Unit / Conversion Factor change protection if transactions exist
   const hasUnitChanges = (
     mergedUnit !== product.unit ||
     mergedHasSecondaryUnit !== product.hasSecondaryUnit ||
@@ -479,7 +525,6 @@ export const updateProduct = async (tenantId, productId, data = {}) => {
     }
   }
 
-  // Rule 1 & 4: Final-state validation on merged multi-unit fields and clearing stale fields
   let finalSecondaryUnit = mergedSecondaryUnit;
   let finalConversionFactor = mergedConversionFactor;
   let finalSecondaryPurchasePrice = mergedSecondaryPurchasePrice;
@@ -499,152 +544,214 @@ export const updateProduct = async (tenantId, productId, data = {}) => {
       finalPurchasePrice = Math.round((mergedSecondaryPurchasePrice / mergedConversionFactor) * 100) / 100;
     }
   } else {
-    // Rule 4: Clear secondary fields when hasSecondaryUnit = false
     finalSecondaryUnit = null;
     finalConversionFactor = 1;
     finalSecondaryPurchasePrice = null;
   }
 
-  // Rule 10: Category / SubCategory tenant ownership check
-  let updateCatId = product.categoryId;
-  let updateSubCatId = product.subCategoryId;
-  if (bodyData.categoryId || bodyData.subCategoryId) {
-    updateCatId = bodyData.categoryId || product.categoryId;
-    updateSubCatId = bodyData.subCategoryId || product.subCategoryId;
+  // Category / SubCategory tenant ownership check & fetch with additionalFields
+  const updateCatId = bodyData.categoryId || product.categoryId;
+  const updateSubCatId = bodyData.subCategoryId || product.subCategoryId;
 
-    const category = await prisma.category.findUnique({ where: { id: updateCatId } });
-    if (!category) throw new ApiError(404, 'Category not found.');
+  const category = await prisma.category.findUnique({ where: { id: updateCatId } });
+  if (!category) throw new ApiError(404, 'Category not found.');
 
-    const subCategory = await prisma.subCategory.findFirst({
-      where: { id: updateSubCatId, categoryId: updateCatId }
-    });
-    if (!subCategory) throw new ApiError(404, 'Sub-Category not found under specified Category.');
+  const subCategory = await prisma.subCategory.findFirst({
+    where: { id: updateSubCatId, categoryId: updateCatId },
+    include: { additionalFields: true }
+  });
+  if (!subCategory) throw new ApiError(400, 'Selected Sub-Category does not belong to specified Category.');
+
+  // Validate Merged additionalValues against SubCategory required additionalFields
+  let incomingAdditionalValues = bodyData.additionalValues;
+  if (typeof incomingAdditionalValues === 'string') {
+    try { incomingAdditionalValues = JSON.parse(incomingAdditionalValues); } catch (e) {}
   }
 
-  let parsedAdditionalValues = bodyData.additionalValues;
-  if (typeof parsedAdditionalValues === 'string') {
-    try { parsedAdditionalValues = JSON.parse(parsedAdditionalValues); } catch (e) {}
+  const mergedAdditionalValues = {
+    ...(product.additionalValues || {}),
+    ...(incomingAdditionalValues || {})
+  };
+
+  if (subCategory.additionalFields && subCategory.additionalFields.length > 0) {
+    for (const field of subCategory.additionalFields) {
+      if (field.isRequired && (!mergedAdditionalValues || mergedAdditionalValues[field.labelName] === undefined || mergedAdditionalValues[field.labelName] === null || String(mergedAdditionalValues[field.labelName]).trim() === '')) {
+        throw new ApiError(400, `The field '${field.labelName}' is required for this Sub-Category.`);
+      }
+    }
   }
 
+  // Validate Merged Expiry Date if SubCategory requires expiry
+  const mergedExpiryDate = bodyData.expiryDate !== undefined ? bodyData.expiryDate : product.expiryDate;
+  if (subCategory.enableExpiryDate && (!mergedExpiryDate || !String(mergedExpiryDate).trim())) {
+    throw new ApiError(400, 'Expiry date is required for products under this Sub-Category.');
+  }
+
+  // TaxType / TaxMode Update Consistency
+  const rawTaxType = bodyData.taxType || bodyData.taxMode || product.taxType;
+  const resolvedTaxType = ['EXEMPT', 'NON_GST'].includes((rawTaxType || '').toUpperCase())
+    ? rawTaxType.toUpperCase()
+    : (['INCLUSIVE', 'GST_INCLUSIVE'].includes((rawTaxType || '').toUpperCase()) ? 'INCLUSIVE' : 'GST');
+
+  // Process Image Upload
+  let newlyUploadedImageUrl = null;
   let uploadedImageUrl = product.productImage;
+  let oldImageToDeleteLater = null;
+
   if (bodyData.productImage !== undefined) {
     if (bodyData.productImage) {
       const uploadRes = await uploadToCloudinary(bodyData.productImage, 'billing_saas/products');
       if (uploadRes && uploadRes.url) {
+        newlyUploadedImageUrl = uploadRes.url;
         if (product.productImage && product.productImage !== uploadRes.url) {
-          await deleteFromCloudinary(product.productImage);
+          oldImageToDeleteLater = product.productImage;
         }
         uploadedImageUrl = uploadRes.url;
       }
     } else {
       if (product.productImage) {
-        await deleteFromCloudinary(product.productImage);
+        oldImageToDeleteLater = product.productImage;
       }
       uploadedImageUrl = null;
     }
   }
 
-  const updatedProduct = await prisma.product.update({
-    where: { id: productId },
-    data: {
-      ...(bodyData.name && { name: bodyData.name.trim() }),
-      sku: normalizedSku,
-      ...(bodyData.hsnCode !== undefined && { hsnCode: bodyData.hsnCode ? bodyData.hsnCode.trim() : null }),
-      ...(bodyData.brand !== undefined && { brand: bodyData.brand ? bodyData.brand.trim() : null }),
-      unit: mergedUnit,
-      hasSecondaryUnit: mergedHasSecondaryUnit,
-      secondaryUnit: finalSecondaryUnit,
-      conversionFactor: finalConversionFactor,
-      secondaryPurchasePrice: finalSecondaryPurchasePrice,
-      purchasePrice: finalPurchasePrice,
-      ...(bodyData.sellingPrice !== undefined && { sellingPrice: parseFloat(bodyData.sellingPrice) }),
-      ...(bodyData.mrp !== undefined && { mrp: parseFloat(bodyData.mrp) }),
-      ...(bodyData.taxType !== undefined || bodyData.taxMode !== undefined ? { taxType: bodyData.taxType || bodyData.taxMode } : {}),
-      ...(bodyData.discountPercent !== undefined && { discountPercent: parseFloat(bodyData.discountPercent) }),
-      ...(bodyData.taxId !== undefined || bodyData.taxPercent !== undefined ? { taxId: await resolveTaxId(tenantId, bodyData.taxId, bodyData.taxPercent, bodyData.taxType || product.taxType) } : {}),
-      ...(bodyData.maxStockLevel !== undefined && { maxStockLevel: parseFloat(bodyData.maxStockLevel) }),
-      ...(bodyData.minStockLevel !== undefined && { minStockLevel: parseFloat(bodyData.minStockLevel) }),
-      ...(bodyData.stockAlertQuantity !== undefined && { stockAlertQuantity: parseFloat(bodyData.stockAlertQuantity) }),
-      ...(bodyData.enableStockAlert !== undefined && { enableStockAlert: Boolean(bodyData.enableStockAlert) }),
-      ...(bodyData.productImage !== undefined && { productImage: uploadedImageUrl }),
-      ...(bodyData.description !== undefined && { description: bodyData.description }),
-      ...(bodyData.expiryDate !== undefined && { expiryDate: bodyData.expiryDate ? new Date(bodyData.expiryDate) : null }),
-      ...(parsedAdditionalValues !== undefined && { additionalValues: parsedAdditionalValues }),
-      ...(bodyData.status && { status: bodyData.status.toUpperCase() === 'INACTIVE' || bodyData.status.toUpperCase() === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE' })
-    },
-    include: { category: true, subCategory: true, tax: true }
-  });
-  return formatSingleProduct(updatedProduct);
+  try {
+    const updatedProduct = await prisma.$transaction(async (tx) => {
+      const resolvedTaxIdVal = (bodyData.taxId !== undefined || bodyData.taxPercent !== undefined || bodyData.taxType !== undefined || bodyData.taxMode !== undefined)
+        ? await resolveTaxId(tenantId, bodyData.taxId !== undefined ? bodyData.taxId : product.taxId, bodyData.taxPercent !== undefined ? bodyData.taxPercent : product.taxPercent, resolvedTaxType, tx)
+        : product.taxId;
+
+      return await tx.product.update({
+        where: { id: productId },
+        data: {
+          categoryId: updateCatId,
+          subCategoryId: updateSubCatId,
+          ...(bodyData.name && { name: bodyData.name.trim() }),
+          sku: normalizedSku,
+          ...(bodyData.hsnCode !== undefined && { hsnCode: bodyData.hsnCode.trim() }),
+          ...(bodyData.brand !== undefined && { brand: bodyData.brand ? bodyData.brand.trim() : null }),
+          unit: mergedUnit,
+          hasSecondaryUnit: mergedHasSecondaryUnit,
+          secondaryUnit: finalSecondaryUnit,
+          conversionFactor: finalConversionFactor,
+          secondaryPurchasePrice: finalSecondaryPurchasePrice,
+          purchasePrice: finalPurchasePrice,
+          ...(bodyData.sellingPrice !== undefined && { sellingPrice: parseFloat(bodyData.sellingPrice) }),
+          ...(bodyData.mrp !== undefined && { mrp: parseFloat(bodyData.mrp) }),
+          taxType: resolvedTaxType,
+          ...(bodyData.discountPercent !== undefined && { discountPercent: parseFloat(bodyData.discountPercent) }),
+          taxId: resolvedTaxIdVal,
+          ...(bodyData.maxStockLevel !== undefined && { maxStockLevel: parseFloat(bodyData.maxStockLevel) }),
+          ...(bodyData.minStockLevel !== undefined && { minStockLevel: parseFloat(bodyData.minStockLevel) }),
+          ...(bodyData.reorderLevel !== undefined && { reorderLevel: parseFloat(bodyData.reorderLevel) }),
+          ...(bodyData.reorderQuantity !== undefined && { reorderQuantity: parseFloat(bodyData.reorderQuantity) }),
+          ...(bodyData.stockAlertQuantity !== undefined && { stockAlertQuantity: parseFloat(bodyData.stockAlertQuantity) }),
+          ...(bodyData.enableStockAlert !== undefined && { enableStockAlert: parseBoolean(bodyData.enableStockAlert) }),
+          ...(bodyData.productImage !== undefined && { productImage: uploadedImageUrl }),
+          ...(bodyData.description !== undefined && { description: bodyData.description }),
+          ...(bodyData.expiryDate !== undefined && { expiryDate: subCategory.enableExpiryDate && mergedExpiryDate ? new Date(mergedExpiryDate) : null }),
+          additionalValues: mergedAdditionalValues,
+          ...(bodyData.status && { status: bodyData.status.toUpperCase() === 'INACTIVE' || bodyData.status.toUpperCase() === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE' })
+        },
+        include: { category: true, subCategory: true, tax: true }
+      });
+    });
+
+    // Delete old image ONLY after DB transaction commits successfully
+    if (oldImageToDeleteLater) {
+      await deleteFromCloudinary(oldImageToDeleteLater).catch(() => {});
+    }
+
+    return formatSingleProduct(updatedProduct);
+  } catch (error) {
+    // If DB transaction fails, clean up newly uploaded image to prevent orphaned Cloudinary files
+    if (newlyUploadedImageUrl) {
+      await deleteFromCloudinary(newlyUploadedImageUrl).catch(() => {});
+    }
+    if (error?.code === 'P2002') {
+      throw new ApiError(409, `Product with SKU '${normalizedSku}' already exists in your store.`);
+    }
+    throw error;
+  }
 };
 
 export const deleteProduct = async (tenantId, productId) => {
   const product = await prisma.product.findFirst({ where: { id: productId, tenantId } });
   if (!product) throw new ApiError(404, 'Product not found.');
 
-  if (product.productImage) {
-    await deleteFromCloudinary(product.productImage);
-  }
-
-  return await prisma.product.update({
+  const deleted = await prisma.product.update({
     where: { id: productId },
     data: { status: 'SUSPENDED' }
   });
+
+  if (product.productImage) {
+    await deleteFromCloudinary(product.productImage).catch(() => {});
+  }
+
+  return deleted;
 };
 
+// Concurrency-Safe Atomic Stock Adjustments with Strict Atomic Negative-Stock Guard & Exact History Calculation
 export const adjustProductStock = async (tenantId, userId, productId, data = {}) => {
-  const { quantityChange, reason = 'STOCK_ADJUSTMENT', notes } = data;
+  const { quantityChange, reason = 'STOCK_ADJUSTMENT' } = data;
   const change = parseFloat(quantityChange);
   if (isNaN(change) || change === 0) {
     throw new ApiError(400, 'Quantity change must be a non-zero number.');
   }
 
-  const product = await prisma.product.findFirst({ where: { id: productId, tenantId } });
-  if (!product) throw new ApiError(404, 'Product not found.');
-
-  const previousStock = product.currentStock;
-  const updatedStock = previousStock + change;
-
-  if (updatedStock < 0) {
-    throw new ApiError(400, `Cannot reduce stock below 0. Current stock is ${previousStock}.`);
-  }
+  const direction = change > 0 ? 'IN' : 'OUT';
+  const absQty = Math.abs(change);
 
   return await prisma.$transaction(async (tx) => {
-    const updatedProduct = await tx.product.update({
-      where: { id: productId },
-      data: { currentStock: updatedStock }
+    const result = await recordStockMovement(tx, {
+      tenantId,
+      userId,
+      productId,
+      quantity: absQty,
+      direction,
+      reason: reason || 'STOCK_ADJUSTMENT'
     });
 
-    const history = await tx.stockHistory.create({
-      data: {
-        tenantId,
-        productId,
-        previousStock,
-        addedRemovedQty: change,
-        updatedStock,
-        reason: reason || 'STOCK_ADJUSTMENT',
-        updatedByUserId: userId
-      }
-    });
-
-    return { product: formatSingleProduct(updatedProduct), history };
+    return { product: formatSingleProduct(result.product), history: result.history };
   });
 };
 
+// Import with Detailed Row-Level Validation & Error Reporting (No Fake HSN 999999, No Fake Selling Price 100)
 export const importProducts = async (tenantId, userId, productsArray = []) => {
   if (!Array.isArray(productsArray) || productsArray.length === 0) {
     throw new ApiError(400, 'At least one valid product record is required for import.');
   }
 
   let defaultCategory = await prisma.category.findFirst();
-  let defaultSubCategory = await prisma.subCategory.findFirst();
+  let defaultSubCategory = defaultCategory
+    ? await prisma.subCategory.findFirst({ where: { categoryId: defaultCategory.id }, include: { additionalFields: true } })
+    : null;
 
   let importedCount = 0;
+  const errors = [];
   const importedProducts = [];
 
-  for (const item of productsArray) {
-    if (!item.name || !item.name.trim()) continue;
+  for (let i = 0; i < productsArray.length; i++) {
+    const item = productsArray[i];
+    const rowNum = i + 1;
 
-    // Resolve Category by ID or Name
+    if (!item.name || !item.name.trim()) {
+      errors.push({ row: rowNum, name: item.name || 'N/A', error: 'Product Name is required.' });
+      continue;
+    }
+
+    if (!item.hsnCode || !item.hsnCode.trim()) {
+      errors.push({ row: rowNum, name: item.name, error: 'HSN Code is required.' });
+      continue;
+    }
+
+    if (item.sellingPrice === undefined || item.sellingPrice === null || parseFloat(item.sellingPrice) <= 0) {
+      errors.push({ row: rowNum, name: item.name, error: 'Valid Selling Price (> 0) is required.' });
+      continue;
+    }
+
+    // Resolve Category
     let catId = item.categoryId;
     if (!catId && item.categoryName) {
       const foundCat = await prisma.category.findFirst({ where: { name: { equals: item.categoryName.trim(), mode: 'insensitive' } } });
@@ -652,89 +759,157 @@ export const importProducts = async (tenantId, userId, productsArray = []) => {
     }
     if (!catId) catId = defaultCategory?.id;
 
-    // Resolve SubCategory by ID or Name
+    // Resolve SubCategory & Category-SubCategory Relationship Check
+    let subCatObj = null;
     let subCatId = item.subCategoryId;
-    if (!subCatId && item.subCategoryName && catId) {
-      const foundSub = await prisma.subCategory.findFirst({
-        where: { categoryId: catId, name: { equals: item.subCategoryName.trim(), mode: 'insensitive' } }
+    if (subCatId) {
+      subCatObj = await prisma.subCategory.findFirst({
+        where: { id: subCatId, categoryId: catId },
+        include: { additionalFields: true }
       });
-      if (foundSub) subCatId = foundSub.id;
+    } else if (item.subCategoryName && catId) {
+      subCatObj = await prisma.subCategory.findFirst({
+        where: { categoryId: catId, name: { equals: item.subCategoryName.trim(), mode: 'insensitive' } },
+        include: { additionalFields: true }
+      });
+      if (subCatObj) subCatId = subCatObj.id;
     }
-    if (!subCatId) subCatId = defaultSubCategory?.id;
 
-    if (!catId || !subCatId) continue;
+    if (!subCatObj && defaultSubCategory && defaultSubCategory.categoryId === catId) {
+      subCatObj = defaultSubCategory;
+      subCatId = defaultSubCategory.id;
+    }
 
-    // Ensure unique SKU per tenant
-    let sku = item.sku && item.sku.trim() ? item.sku.trim() : `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    if (!catId || !subCatId || !subCatObj || subCatObj.categoryId !== catId) {
+      errors.push({ row: rowNum, name: item.name, error: 'Sub-Category does not belong to the specified Category.' });
+      continue;
+    }
+
+    // Multi-unit validation
+    const isMultiUnit = parseBoolean(item.hasSecondaryUnit);
+    const parsedConversion = item.conversionFactor ? parseFloat(item.conversionFactor) : 1;
+    const parsedSecPrice = item.secondaryPurchasePrice ? parseFloat(item.secondaryPurchasePrice) : null;
+    let purchasePrice = item.purchasePrice ? parseFloat(item.purchasePrice) : 0;
+
+    if (isMultiUnit) {
+      if (!item.secondaryUnit || !item.secondaryUnit.trim()) {
+        errors.push({ row: rowNum, name: item.name, error: 'Secondary Unit is required when Multi-Unit is enabled.' });
+        continue;
+      }
+      if (parsedConversion <= 0) {
+        errors.push({ row: rowNum, name: item.name, error: 'Conversion factor must be greater than 0.' });
+        continue;
+      }
+      if (!parsedSecPrice || parsedSecPrice <= 0) {
+        errors.push({ row: rowNum, name: item.name, error: 'Secondary purchase price must be greater than 0.' });
+        continue;
+      }
+      if (purchasePrice <= 0) {
+        purchasePrice = Math.round((parsedSecPrice / parsedConversion) * 100) / 100;
+      }
+    }
+
+    // Validate Required Custom Fields
+    let parsedAdditionalValues = item.additionalValues;
+    if (typeof parsedAdditionalValues === 'string') {
+      try { parsedAdditionalValues = JSON.parse(parsedAdditionalValues); } catch (e) { parsedAdditionalValues = {}; }
+    }
+
+    let hasCustomFieldError = false;
+    if (subCatObj.additionalFields && subCatObj.additionalFields.length > 0) {
+      for (const field of subCatObj.additionalFields) {
+        if (field.isRequired && (!parsedAdditionalValues || parsedAdditionalValues[field.labelName] === undefined || parsedAdditionalValues[field.labelName] === null || String(parsedAdditionalValues[field.labelName]).trim() === '')) {
+          errors.push({ row: rowNum, name: item.name, error: `The field '${field.labelName}' is required for this Sub-Category.` });
+          hasCustomFieldError = true;
+          break;
+        }
+      }
+    }
+    if (hasCustomFieldError) continue;
+
+    // Validate Expiry Date if required by Sub-Category
+    if (subCatObj.enableExpiryDate && (!item.expiryDate || !String(item.expiryDate).trim())) {
+      errors.push({ row: rowNum, name: item.name, error: 'Expiry date is required for products under this Sub-Category.' });
+      continue;
+    }
+
+    // SKU Upper-case Normalization
+    let sku = item.sku && item.sku.trim() ? item.sku.trim().toUpperCase() : `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const existingSKU = await prisma.product.findFirst({ where: { tenantId, sku, status: 'ACTIVE' } });
     if (existingSKU) {
       sku = `SKU-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     }
 
-    const hsnCode = item.hsnCode && item.hsnCode.trim() ? item.hsnCode.trim() : '999999';
-    const isMultiUnit = Boolean(item.hasSecondaryUnit);
-    const parsedConversion = item.conversionFactor ? parseFloat(item.conversionFactor) : 1;
-    const parsedSecPrice = item.secondaryPurchasePrice ? parseFloat(item.secondaryPurchasePrice) : null;
-    let purchasePrice = item.purchasePrice ? parseFloat(item.purchasePrice) : 0;
-    if (isMultiUnit && parsedSecPrice && parsedConversion > 0 && purchasePrice <= 0) {
-      purchasePrice = Math.round((parsedSecPrice / parsedConversion) * 100) / 100;
-    }
-
+    const hsnCode = item.hsnCode.trim();
     const openingStock = item.openingStock !== undefined && item.openingStock !== null ? parseFloat(item.openingStock) : 0;
     const resolvedTaxType = (item.taxType || '').toUpperCase() === 'EXEMPT' ? 'EXEMPT' : ((item.taxType || '').toUpperCase() === 'NON_GST' ? 'NON_GST' : (item.taxMode === 'INCLUSIVE' ? 'INCLUSIVE' : 'GST'));
-    const taxId = await resolveTaxId(tenantId, item.taxId, item.taxPercent, resolvedTaxType);
 
-    const product = await prisma.$transaction(async (tx) => {
-      const p = await tx.product.create({
-        data: {
-          tenantId,
-          categoryId: catId,
-          subCategoryId: subCatId,
-          name: item.name.trim(),
-          sku,
-          hsnCode,
-          brand: item.brand ? item.brand.trim() : null,
-          unit: item.unit ? item.unit.trim() : 'Pcs',
-          hasSecondaryUnit: isMultiUnit,
-          secondaryUnit: isMultiUnit && item.secondaryUnit ? item.secondaryUnit.trim() : null,
-          conversionFactor: isMultiUnit ? parsedConversion : 1,
-          secondaryPurchasePrice: isMultiUnit ? parsedSecPrice : null,
-          purchasePrice,
-          sellingPrice: item.sellingPrice ? parseFloat(item.sellingPrice) : 100,
-          mrp: item.mrp ? parseFloat(item.mrp) : (item.sellingPrice ? parseFloat(item.sellingPrice) : 100),
-          taxType: resolvedTaxType,
-          discountPercent: item.discountPercent ? parseFloat(item.discountPercent) : 0,
-          taxId,
-          openingStock,
-          currentStock: openingStock,
-          minStockLevel: item.minStockLevel ? parseFloat(item.minStockLevel) : 5,
-          expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
-          status: 'ACTIVE'
-        }
-      });
-
-      if (openingStock > 0) {
-        await tx.stockHistory.create({
+    try {
+      const product = await prisma.$transaction(async (tx) => {
+        const taxId = await resolveTaxId(tenantId, item.taxId, item.taxPercent, resolvedTaxType, tx);
+        const p = await tx.product.create({
           data: {
             tenantId,
-            productId: p.id,
-            previousStock: 0,
-            addedRemovedQty: openingStock,
-            updatedStock: openingStock,
-            reason: 'OPENING_STOCK',
-            updatedByUserId: userId
+            categoryId: catId,
+            subCategoryId: subCatId,
+            name: item.name.trim(),
+            sku,
+            hsnCode,
+            brand: item.brand ? item.brand.trim() : null,
+            unit: item.unit ? item.unit.trim() : 'Pcs',
+            hasSecondaryUnit: isMultiUnit,
+            secondaryUnit: isMultiUnit && item.secondaryUnit ? item.secondaryUnit.trim() : null,
+            conversionFactor: isMultiUnit ? parsedConversion : 1,
+            secondaryPurchasePrice: isMultiUnit ? parsedSecPrice : null,
+            purchasePrice,
+            sellingPrice: parseFloat(item.sellingPrice),
+            mrp: item.mrp ? parseFloat(item.mrp) : parseFloat(item.sellingPrice),
+            taxType: resolvedTaxType,
+            discountPercent: item.discountPercent ? parseFloat(item.discountPercent) : 0,
+            taxId,
+            openingStock,
+            currentStock: openingStock,
+            minStockLevel: item.minStockLevel ? parseFloat(item.minStockLevel) : 5,
+            reorderLevel: item.reorderLevel ? parseFloat(item.reorderLevel) : 10,
+            reorderQuantity: item.reorderQuantity ? parseFloat(item.reorderQuantity) : 50,
+            expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
+            additionalValues: parsedAdditionalValues || {},
+            status: 'ACTIVE'
           }
         });
-      }
 
-      return p;
-    });
+        if (openingStock > 0) {
+          await tx.stockHistory.create({
+            data: {
+              tenantId,
+              productId: p.id,
+              previousStock: 0,
+              addedRemovedQty: openingStock,
+              updatedStock: openingStock,
+              reason: 'OPENING_STOCK',
+              updatedByUserId: userId,
+              movementQuantity: openingStock,
+              movementUnit: p.unit || 'Pcs',
+              baseQuantity: openingStock,
+              baseUnit: p.unit || 'Pcs',
+              referenceType: 'PRODUCT_EXCEL_IMPORT',
+              referenceId: p.id,
+              notes: `Initial Opening Stock via Excel Import for ${p.name}`
+            }
+          });
+        }
 
-    importedProducts.push(product);
-    importedCount++;
+        return p;
+      });
+
+      importedProducts.push(product);
+      importedCount++;
+    } catch (e) {
+      errors.push({ row: rowNum, name: item.name, error: e.message || 'Product import creation failed.' });
+    }
   }
 
-  return { importedCount, products: importedProducts };
+  return { importedCount, skippedCount: errors.length, errors, products: importedProducts };
 };
 
 export const exportProducts = async (tenantId, filters = {}) => {

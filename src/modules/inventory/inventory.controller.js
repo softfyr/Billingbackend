@@ -1,6 +1,7 @@
 import * as inventoryService from './inventory.service.js';
 import { ApiResponse } from '../../utils/apiResponse.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
+import { exportToExcel, exportToCSV } from '../../utils/export.utility.js';
 
 export const handleGetInventory = asyncHandler(async (req, res) => {
   const { categoryId, subCategoryId, statusFilter, search } = req.query;
@@ -13,12 +14,30 @@ export const handleUpdateStockManual = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, result, 'Stock updated manually successfully.');
 });
 
-export const handleGetExpiryAlerts = asyncHandler(async (req, res) => {
-  const alerts = await inventoryService.getExpiryAlerts(req.tenantId);
-  return ApiResponse.success(res, alerts, 'Expiry alerts fetched successfully.');
+export const handleReconcileStock = asyncHandler(async (req, res) => {
+  const result = await inventoryService.reconcilePhysicalStock(req.tenantId, req.user.id, req.body);
+  return ApiResponse.success(res, result, result.message || 'Physical stock reconciliation completed successfully.');
 });
 
-import { exportToExcel, exportToCSV } from '../../utils/export.utility.js';
+export const handleDamageStock = asyncHandler(async (req, res) => {
+  const result = await inventoryService.recordDamageStock(req.tenantId, req.user.id, req.body);
+  return ApiResponse.success(res, result, 'Damaged stock written off successfully.');
+});
+
+export const handleProcessProductReturn = asyncHandler(async (req, res) => {
+  const result = await inventoryService.recordLostStock(req.tenantId, req.user.id, req.body);
+  return ApiResponse.success(res, result, 'Lost stock written off successfully.');
+});
+
+export const handleLostStock = asyncHandler(async (req, res) => {
+  const result = await inventoryService.recordLostStock(req.tenantId, req.user.id, req.body);
+  return ApiResponse.success(res, result, 'Lost stock written off successfully.');
+});
+
+export const handleGetExpiryAlerts = asyncHandler(async (req, res) => {
+  const alerts = await inventoryService.getExpiryAlerts(req.tenantId, req.query);
+  return ApiResponse.success(res, alerts, 'Expiry alerts fetched successfully.');
+});
 
 export const handleExportInventoryLogs = asyncHandler(async (req, res) => {
   const exportData = await inventoryService.exportInventoryLogs(req.tenantId, req.query);
