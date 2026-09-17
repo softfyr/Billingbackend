@@ -70,6 +70,10 @@ enum StockReason {
   CORRECTION
   CANCELLED_BILL
   LOST
+  RETURN
+  NEW_PURCHASE
+  MANUAL_ADJUSTMENT
+  DAMAGED
 }
 
 enum PurchaseStatus {
